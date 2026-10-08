@@ -1,49 +1,50 @@
-# GT4 Reader
+# 素阅 · suyue
 
-面向 **HUAWEI WATCH GT 4 46 mm（466 × 466 圆屏）** 的个人离线阅读器，以及配套的鸿蒙手机传书应用。
+面向 **HUAWEI WATCH GT 4 46 mm（466 × 466 圆屏）** 的个人离线小说阅读器，以及配套的鸿蒙手机传书应用。
 
-> 当前状态：**手表本地阅读原型；未编译、未实机验证；手机传书仍未接通。** 没有可直接安装的 HAP。
+> 当前状态：**源码原型，尚无可安装 HAP**。Watch 仅有本地测试书，手机仅有系统文件选择器；传书、书籍格式转换与双端编译验证均未完成。
 
-## 项目目标
+## 两个不同的运行环境
 
-- **手表端**（HarmonyOS Lite Wearable，JS/HML/CSS）：圆屏安全区排版、离线 TXT 阅读、进度保存、以后支持表冠翻页/目录/字号。
-- **手机端**（HarmonyOS NEXT / ArkTS）：TXT / EPUB 导入与转换、章节整理、Wear Engine 传书。
-- **共享协议**：手机→手表的分块、回执、校验、失败恢复。
+- **手表（`apps/watch`）**：HarmonyOS Lite Wearable 的 JS FA（HML/CSS/JS）。不能直接运行 Rust writer_core、ArkTS Stage HAP 或 Wear OS APK。
+- **手机（`apps/phone`）**：HarmonyOS NEXT / ArkTS Stage（优先 Pocket 2）。手机适合做 TXT/EPUB 转换与书籍管理。
+- **`shared/protocol`**：双端约定的协议文档，非直接共享可执行的二进制核心。
 
-## 结构
+## 已写入的源码
+
+- 手表本地生成一份长中文测试书、按字节读取与估算分页、前后翻页和进度 JSON；未实机验证。
+- 手机可调用系统文档选择器选择 TXT/EPUB 的 URI；**尚未读取或导入书籍正文**。
+- Wear Engine 消息接收入口在手机指纹尚未配置时停用；未完成真实传书。
+- 第三方示例借鉴、原作者 MIT 声明：[来源说明](docs/REFERENCES.md)、[版权说明](third_party/NOTICE.md)。
+- Node 分页回归测试可运行；**CI 通过不等于 HAP 构建成功**。
+
+## 目标流程
+
+手机选择 TXT/EPUB → 手机解析、转换为 UTF-8 章节 → Wear Engine 传给 GT 4 → 手表核对并保存 → 圆屏离线阅读。
+
+## 开发与构建
+
+- 手表 Lite Wearable 与手机 Stage 必须分开编译、分开签名，不要混用构建工具链。
+- 首先验证 GT 4 46mm 支持哪组 Lite SDK/IDE + 签名 + DevEco Assistant 安装流程，才配置真正能产生 signed HAP 的 CI。
+- 手机端可借鉴已有鸿蒙 NEXT CLI 构建流程，**但需要独立应用证书和本项目构建配置**；素笺的打包脚本不能原封不动使用。
+- 详细状态、环境差异和验收清单见 [开发与安装路线](docs/BUILD_AND_TRANSFER.md)。
+- 当前仅有源码检查与分页测试，尚未进行两端 DevEco 编译或设备验证。
+
+## 项目目录
 
 ```text
-apps/
-  watch/       Lite Wearable 工程：书架、文件操作、分页、进度、Wear Engine 接收入口
-  phone/       ArkTS Stage 手机端静态首页（导入/传书待实现）
-shared/
-  protocol/    双端传书协议草案
-docs/
-  ARCHITECTURE.md
-  REFERENCES.md
-third_party/
-  NOTICE.md    MIT 示例来源及版权保留
-  licenses/    所借鉴源码的对应许可证
+apps/watch/       Lite Wearable 手表应用
+apps/phone/       ArkTS Stage 手机应用
+shared/protocol/  双端通信协议草案
+docs/             架构、参考项目、构建说明
+third_party/      MIT 原作者声明和许可证
+tests/            与系统 SDK 无关的静态检查/分页测试
 ```
 
-## 已实现（源码级，非真机已验证）
+## 名称和包名
 
-- 手表首页进入本地中文测试书；首次启动向 `internal://app/gt4reader` 写入一份超过 4096 字节的 TXT。
-- 通过 `@system.file.readArrayBuffer` 按文件**字节偏移**读取，`PageLayout` 解码 UTF-8 并形成估算长度的一页；前后翻页，保存最近进度。
-- 接入 Wear Engine 消息订阅入口；当真实签名指纹未配置时会明确停用。收到文件不自动信任或导入。
-- 参考 [3 个 GT 4 Lite Wearable MIT 示例](docs/REFERENCES.md) 的文件和通信接口；第三方来源、原版权及完整 MIT 条款详见 [NOTICE](third_party/NOTICE.md)。
-- 轻量分页逻辑附不依赖第三方包的 Node 回归测试：`node --experimental-default-type=module tests/pagination.test.mjs`。
-
-## 还没有完成
-
-- 从手机导入 TXT/EPUB、转换、发送书籍，以及手表接收后验证并加入书架的整套链路。
-- 多书书架、真正的章节目录、表冠翻页、屏幕字形像素测量、存储/耗电压力测试。
-- GT 4 专用 DevEco 构建、签名、安装验证；目前不能保证 HAP 能一次通过。
-
-## 构建与安装
-
-手表端用支持 Lite Wearable 的 DevEco Studio 打开 `apps/watch`；手机端用支持 ArkTS Stage 的 DevEco Studio 打开 `apps/phone`。二者签名分别配置，证书/私钥不可提交。**目前不提供“下载即用”的安装包。**
+产品名称为「素阅」，仓库名为 `suyue`。为避免签名指纹、配对设置和以后阅读进度路径发生无谓变化，历史包名 `com.xiwei753.gt4reader.watch`、`com.xiwei753.gt4reader.phone` 以及应用内部文件路径暂不改动。**显示名称改了，不等于应用包名也要改。**
 
 ## 授权
 
-原创代码按 [GPL-3.0-only](LICENSE) 发布；借鉴或改造的 MIT 示例保留原许可证及版权声明；未打包原华为 Wear Engine SDK wrapper（Apache-2.0）。见 [REFERENCES](docs/REFERENCES.md)。
+原创代码按 [GPL-3.0-only](LICENSE) 发布。借鉴的 MIT 源码片段保留原许可证及版权声明，详见 [REFERENCES](docs/REFERENCES.md)。

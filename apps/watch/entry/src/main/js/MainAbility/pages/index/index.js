@@ -5,7 +5,7 @@ import { beginReceive, stopReceive } from '../../wear/WearReceiver';
 
 export default {
   data: {
-    title: 'GT4 Reader',
+    title: '素阅',
     demoTitle: '中文阅读测试',
     status: '正在准备本地书库',
     ready: false,

@@ -2,11 +2,11 @@
   "string": [
     {
       "name": "MainAbility_label",
-      "value": "GT4 Reader"
+      "value": "素阅"
     },
     {
       "name": "MainAbility_desc",
-      "value": "GT4 offline reader demo"
+      "value": "素阅 · GT 4 离线阅读器"
     }
   ]
 }

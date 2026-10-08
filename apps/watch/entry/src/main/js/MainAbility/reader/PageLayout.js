@@ -28,7 +28,6 @@ export function decodeAt(bytes, pos) {
   return { char: String.fromCharCode(0xD800 + (pair >> 10), 0xDC00 + (pair & 1023)), size: width };
 }
 
-// 利用真实字节位置分页，返回下一页的 byteOffset；不跳过未显示的字。
 export function takePage(bytes, offset, columns, maxRows) {
   const cols = columns || 14;
   const rowsLimit = maxRows || 7;
@@ -38,15 +37,16 @@ export function takePage(bytes, offset, columns, maxRows) {
   let text = '';
   while (used < bytes.length) {
     const item = decodeAt(bytes, used);
-    if (!item) break; // 读块尾部出现半个 UTF-8 字符，不能把它当有效字符。
+    if (!item) break; // 不能消耗不完整的 UTF-8 字符。
     const ch = item.char;
     if (ch === '\r') { used += item.size; continue; }
     if (ch === '\n') {
       if (row >= rowsLimit) break;
       text += '\n'; row++; col = 0; used += item.size; continue;
     }
-    const cp = ch.codePointAt(0);
-    const advance = cp <= 0x7F ? (ch === '\t' ? 2 : 0.55) : 1;
+    // 避免 lite-JS 老运行时可能没有的 String.prototype.codePointAt。
+    const firstUnit = ch.charCodeAt(0);
+    const advance = firstUnit <= 0x7F ? (ch === '\t' ? 2 : 0.55) : 1;
     if (col + advance > cols) {
       if (row >= rowsLimit) break;
       row++; col = 0;

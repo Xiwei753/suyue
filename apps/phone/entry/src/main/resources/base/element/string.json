@@ -2,11 +2,11 @@
   "string": [
     {
       "name": "EntryAbility_desc",
-      "value": "GT4 Reader phone entry"
+      "value": "素阅手机书库与手表传书"
     },
     {
       "name": "app_name",
-      "value": "GT4 传书"
+      "value": "素阅传书"
     }
   ]
 }
