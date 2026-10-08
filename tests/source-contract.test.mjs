@@ -35,4 +35,15 @@ for (const svc of ['BookImportService', 'TextDecodeService',
 assert.ok(existsSync('apps/phone/entry/src/main/ets/model/BookModels.ets'));
 assert.ok(read('README.md').startsWith('# 素阅 · suyue'));
 assert.ok(read('docs/BUILD_AND_TRANSFER.md').includes('尚未产出任何 HAP'));
+const protocolReadme = read('shared/protocol/README.md');
+for (const t of ['BOOK_META', 'CHUNK', 'ACK', 'FINISH', 'RESULT',
+  'RESUME', 'ERROR', 'E_MISSING_CHUNKS', 'E_DIGEST_MISMATCH']) {
+  assert.ok(protocolReadme.includes(t),
+    'protocol spec must define ' + t);
+}
+for (const ex of ['hello', 'book-meta', 'chunk', 'ack', 'result',
+  'resume', 'error']) {
+  assert.ok(existsSync('shared/protocol/examples/' + ex + '.json'),
+    'protocol example missing: ' + ex);
+}
 console.log('PASS: repo structure, watch JS routes, phone import stack and branding (static only)');

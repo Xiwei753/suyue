@@ -1,12 +1,10 @@
 {
   "v": 0,
   "type": "HELLO",
-  "transferId": "example-001",
   "capabilities": {
-    "formats": [
-      "utf8-text"
-    ],
+    "formats": ["utf8-text"],
     "ack": true,
-    "chunkBytes": null
+    "chunkBytes": null,
+    "fileChannel": true
   }
 }

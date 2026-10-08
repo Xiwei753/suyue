@@ -1,0 +1,16 @@
+{
+  "v": 0,
+  "type": "BOOK_META",
+  "transferId": "9f2c7a1e4b5d48f0a1c2e3d4f5a6b7c8",
+  "bookId": "3a7bd3e2360a4f5c",
+  "title": "示例：中文书名（含标点，。，）",
+  "encoding": "utf-8",
+  "bytes": 128,
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "chunks": 2,
+  "chunkBytes": 96,
+  "chapters": [
+    { "title": "第一章", "offset": 0, "length": 64 },
+    { "title": "第二章", "offset": 64, "length": 64 }
+  ]
+}

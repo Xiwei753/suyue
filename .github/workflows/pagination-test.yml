@@ -24,3 +24,5 @@ jobs:
         run: node --experimental-default-type=module tests/pagination.test.mjs
       - name: Test zip inflate / EPUB unpack guards
         run: node --experimental-default-type=module tests/zip_inflate.test.mjs
+      - name: Test transfer protocol
+        run: node --experimental-default-type=module tests/protocol.test.mjs

@@ -1,0 +1,8 @@
+{
+  "v": 0,
+  "type": "ERROR",
+  "transferId": "9f2c7a1e4b5d48f0a1c2e3d4f5a6b7c8",
+  "bookId": "3a7bd3e2360a4f5c",
+  "code": "E_DIGEST_MISMATCH",
+  "message": "整本 SHA-256 与 BOOK_META 不符，半本书未入书架"
+}
