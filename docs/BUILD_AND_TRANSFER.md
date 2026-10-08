@@ -44,12 +44,28 @@
 手机端打包：`tools/build_phone_hap.sh` + `.github/workflows/phone_hap.yml`
 （自托管 `hmos-deveco` runner，签名材料经 Secrets 注入）。**目前尚未在任何环境实际运行该流程，未产出 HAP。**
 
+## 实施状态（auto-issue-1 分支）
+
+| 阶段 | 内容 | 状态 |
+| --- | --- | --- |
+| 1 | GT4 Lite 工程 + HAP 打包/CI | 源码完成；无 DevEco 环境，未产出 HAP |
+| 2 | 手机 TXT/EPUB 导入沙箱 | 源码完成；Node 验证 ZIP/inflate；DevEco 编译待做 |
+| 3 | 传输协议 v0 + 示例 + 测试 | 完成；tests/protocol.test.mjs 通过 |
+| 4 | 手表多书书架 + 接收校验 | 源码完成；SHA-256/接收逻辑 Node 互验；真机待验证 |
+| 5 | 手机 Wear Engine 发送 | 源码完成（API 形状按华为示例）；真机互通待验证 |
+| 6 | 圆屏阅读体验 | 源码完成；分页回归扩展通过；表冠明确不支持（待 SDK 核对） |
+
+**仍阻断真机验收的环境**：自托管 `hmos-deveco` runner、
+`WATCH_SIGNING_MATERIAL`/`PHONE_SIGNING_MATERIAL`
+Secrets、GT 4 46mm 与 Pocket 2 真机、Wear Engine
+文件通道回调字段核对、手机签名指纹配置。
+
 ## 现有源码不能直接认定兼容的地方
 
 - `apps/watch/build-profile.json5` 暂时采用轻智能手表示例的 `6.1.1(24)` 模板数值，但**没有确认为 GT 4 开发安装实际可用的版本**。
 - HML 页面的几何大小和字号尚未经真机校准；UTF-8 分页是估算字宽，不是字体像素测量。
 - `wear/WearReceiver.js` 有手机端签名指纹占位，若缺少有效配对将停用消息接收。
-- 目前只有 Node 测试（`tests/pagination.test.mjs`）。Node 通过不代表 Lite JS 编译器/ArkTS 编译器通过。
+- 目前只有 Node 测试（`tests/`）。Node 通过不代表 Lite JS 编译器/ArkTS 编译器通过，也不代表 Wear Engine 真机互通。
 - 两套应用包名保留历史命名，以避免与签名注册和传输配置脱节。
 
 ## 可关闭条件（项目总体）
