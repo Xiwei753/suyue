@@ -1,0 +1,38 @@
+# DevEco Studio / Hvigor
+**/.hvigor/
+**/.idea/
+**/build/
+**/out/
+**/.gradle/
+**/oh_modules/
+**/node_modules/
+**/local.properties
+**/oh-package-lock.json5
+
+# Platform build outputs
+*.hap
+*.hsp
+*.app
+*.apk
+*.aab
+
+# Certificates, keys, personal environment
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.pem
+*.key
+*.mobileprovision
+**/signing-config.json
+**/signing-config.json5
+.env
+.env.*
+!.env.example
+
+# Local file and OS artifacts
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp

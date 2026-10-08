@@ -1,0 +1,12 @@
+{
+  "string": [
+    {
+      "name": "MainAbility_label",
+      "value": "GT4 Reader"
+    },
+    {
+      "name": "MainAbility_desc",
+      "value": "GT4 offline reader demo"
+    }
+  ]
+}
