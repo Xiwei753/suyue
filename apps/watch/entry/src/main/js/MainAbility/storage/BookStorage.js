@@ -1,0 +1,142 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// 通用书籍文件存储：应用私有目录内的多书管理。
+// 目录结构：
+//   internal://app/gt4reader/books/<bookId>.txt   正式书籍
+//   internal://app/gt4reader/temp/<transferId>    传输暂存
+//   internal://app/gt4reader/progress/<bookId>.json
+//   internal://app/gt4reader/books.json           书库索引
+import file from '@system.file';
+
+export var ROOT = 'internal://app/gt4reader';
+export var BOOKS_DIR = ROOT + '/books';
+export var TEMP_DIR = ROOT + '/temp';
+export var PROGRESS_DIR = ROOT + '/progress';
+export var INDEX_FILE = ROOT + '/books.json';
+
+// bookId 只允许小写十六进制（内容 SHA-256 前 16 字符），
+// 直接映射为文件名，杜绝路径穿越。
+export function isSafeBookId(bookId) {
+  return typeof bookId === 'string' &&
+    /^[0-9a-f]{16}$/.test(bookId);
+}
+
+export function bookPath(bookId) {
+  if (!isSafeBookId(bookId)) {
+    throw new Error('unsafe bookId: ' + bookId);
+  }
+  return BOOKS_DIR + '/' + bookId + '.txt';
+}
+
+export function tempPath(transferId) {
+  if (typeof transferId !== 'string' ||
+      transferId.length < 1 || transferId.length > 128 ||
+      /[^0-9a-zA-Z\-_]/.test(transferId)) {
+    throw new Error('unsafe transferId');
+  }
+  return TEMP_DIR + '/' + transferId;
+}
+
+export function progressPath(bookId) {
+  return PROGRESS_DIR + '/' + bookId + '.json';
+}
+
+export function complete(cb, value) {
+  if (typeof cb === 'function') cb(value);
+}
+
+function ensureDir(uri, cb) {
+  file.access({
+    uri: uri,
+    success: () => complete(cb, { ok: true }),
+    fail: () => file.mkdir({
+      uri: uri,
+      recursive: true,
+      success: () => complete(cb, { ok: true }),
+      fail: (data, code) => complete(cb,
+        { ok: false, reason: 'mkdir', code: code })
+    })
+  });
+}
+
+export function ensureDirs(cb) {
+  ensureDir(BOOKS_DIR, (books) => {
+    if (!books.ok) return complete(cb, books);
+    ensureDir(TEMP_DIR, (temp) => {
+      if (!temp.ok) return complete(cb, temp);
+      ensureDir(PROGRESS_DIR, (progress) => {
+        complete(cb, progress);
+      });
+    });
+  });
+}
+
+// 把整本已解码文本写入暂存文件（消息通道传输完成后调用）。
+export function saveTempBook(transferId, text, cb) {
+  file.writeText({
+    uri: tempPath(transferId),
+    text: text,
+    append: false,
+    success: () => complete(cb, { ok: true }),
+    fail: (data, code) => complete(cb,
+      { ok: false, reason: 'write_temp', code: code })
+  });
+}
+
+// 校验通过后：暂存文件改名为正式书籍文件。
+export function commitVerifiedBook(transferId, bookId, cb) {
+  if (!isSafeBookId(bookId)) {
+    return complete(cb, { ok: false, reason: 'unsafe_book_id' });
+  }
+  file.move({
+    srcUri: tempPath(transferId),
+    dstUri: bookPath(bookId),
+    success: () => complete(cb, { ok: true }),
+    fail: (data, code) => complete(cb,
+      { ok: false, reason: 'move_to_books', code: code })
+  });
+}
+
+export function openBook(bookId, cb) {
+  file.access({
+    uri: bookPath(bookId),
+    success: () => complete(cb, { ok: true }),
+    fail: (data, code) => complete(cb,
+      { ok: false, reason: 'not_found', code: code })
+  });
+}
+
+// 二进制窗口读取：position 是字节偏移，避免在中文 UTF-8 中间截取。
+export function readBytes(bookId, offset, size, cb) {
+  const off = typeof offset === 'number' && isFinite(offset) &&
+    offset > 0 ? Math.floor(offset) : 0;
+  file.readArrayBuffer({
+    uri: bookPath(bookId),
+    position: off,
+    length: size,
+    success: (data) => {
+      if (!data || !data.buffer ||
+          typeof data.buffer.byteLength !== 'number') {
+        return complete(cb, { ok: false, reason: 'invalid_buffer' });
+      }
+      complete(cb, {
+        ok: true, offset: off,
+        bytes: new Uint8Array(data.buffer)
+      });
+    },
+    fail: (data, code) => complete(cb,
+      { ok: false, reason: 'read_failed', code: code })
+  });
+}
+
+export function deleteBook(bookId, cb) {
+  file.delete({
+    uri: bookPath(bookId),
+    success: () => file.delete({
+      uri: progressPath(bookId),
+      success: () => complete(cb, { ok: true }),
+      fail: () => complete(cb, { ok: true })
+    }),
+    fail: (data, code) => complete(cb,
+      { ok: false, reason: 'delete_failed', code: code })
+  });
+}

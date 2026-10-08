@@ -26,3 +26,9 @@ jobs:
         run: node --experimental-default-type=module tests/zip_inflate.test.mjs
       - name: Test transfer protocol
         run: node --experimental-default-type=module tests/protocol.test.mjs
+      - name: Test pure-JS SHA-256
+        run: node --experimental-default-type=module tests/sha256.test.mjs
+      - name: Test watch Utf8/Base64 utils
+        run: node --experimental-default-type=module tests/watch_utils.test.mjs
+      - name: Test watch transfer receiver logic
+        run: node --experimental-default-type=module tests/transfer_logic.test.mjs

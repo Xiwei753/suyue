@@ -1,9 +1,11 @@
 <div class="screen">
   <div class="reading-area">
     <text class="book-title" onclick="backToLibrary">{{ title }}</text>
-    <text class="book-text">{{ body }}</text>
+    <text class="book-text" style="font-size: {{ fontSize }}px; line-height: {{ fontSize * 1.55 }}px;">{{ body }}</text>
     <div class="controls">
       <text class="nav" onclick="previousPage">上页</text>
+      <text class="nav" onclick="changeFont(-1)">A-</text>
+      <text class="nav" onclick="changeFont(1)">A+</text>
       <text class="nav" onclick="nextPage">下页</text>
     </div>
     <text class="page-number">{{ pageHint }}</text>

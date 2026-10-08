@@ -1,7 +1,14 @@
 <div class="screen">
   <div class="panel">
     <text class="heading">{{ title }}</text>
-    <text class="book" onclick="openDemo">{{ demoTitle }}</text>
+    <div class="book-list">
+      <div class="book-row" for="{{ books }}" onclick="openBook($idx)">
+        <text class="book-title">{{ $item.title }}</text>
+        <text class="book-meta">{{ $item.encoding }} · {{ $item.bytes }} 字节</text>
+        <text class="book-delete" onclick="askDelete($idx)">{{ $item.bookId === confirmId ? '确认删除' : '删除' }}</text>
+      </div>
+    </div>
+    <text class="empty" if="{{ books.length === 0 }}">书库为空：请从手机发送 TXT / EPUB</text>
     <text class="hint">{{ status }}</text>
     <text class="foot">{{ transferStatus }}</text>
   </div>

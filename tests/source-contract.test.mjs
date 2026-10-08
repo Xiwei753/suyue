@@ -46,4 +46,32 @@ for (const ex of ['hello', 'book-meta', 'chunk', 'ack', 'result',
   assert.ok(existsSync('shared/protocol/examples/' + ex + '.json'),
     'protocol example missing: ' + ex);
 }
+// 手表端：新书库/接收器/工具模块必须存在，且页面
+// 不再引用 getDemoBook 作为阅读入口。
+const watchFiles = [
+  'storage/BookStorage.js',
+  'storage/LibraryIndex.js',
+  'storage/ProgressStore.js',
+  'wear/IncomingBookReceiver.js',
+  'wear/TransferLogic.js',
+  'wear/WearReceiver.js',
+  'util/Sha256.js',
+  'util/Utf8.js',
+  'util/Base64.js',
+  'reader/PageLayout.js'
+];
+for (const rel of watchFiles) {
+  assert.ok(existsSync('apps/watch/entry/src/main/js/MainAbility/' + rel),
+    'watch module missing: ' + rel);
+}
+const watchReader = read('apps/watch/entry/src/main/js/MainAbility/pages/reader/reader.js');
+assert.ok(!watchReader.includes('getDemoBook'),
+  'reader must open by bookId, not the demo getter');
+assert.ok(watchReader.includes('router.getParams'),
+  'reader must read bookId from router params');
+const watchIndex = read('apps/watch/entry/src/main/js/MainAbility/pages/index/index.js');
+assert.ok(watchIndex.includes('listBooks'),
+  'index page must list the real library');
+assert.ok(watchIndex.includes('askDelete'),
+  'index page must support delete');
 console.log('PASS: repo structure, watch JS routes, phone import stack and branding (static only)');

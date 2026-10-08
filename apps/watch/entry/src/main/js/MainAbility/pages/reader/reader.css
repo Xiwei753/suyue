@@ -9,7 +9,7 @@
 }
 .reading-area {
   width: 316px;
-  height: 322px;
+  height: 400px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -24,7 +24,7 @@
 }
 .book-text {
   width: 100%;
-  height: 242px;
+  height: 280px;
   font-size: 20px;
   line-height: 31px;
   color: #f3f3f3;
@@ -38,7 +38,7 @@
   justify-content: space-around;
 }
 .nav {
-  width: 110px;
+  width: 70px;
   color: #e8edf5;
   font-size: 19px;
   text-align: center;
