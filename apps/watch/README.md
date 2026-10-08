@@ -10,6 +10,14 @@
 - `wear/WearReceiver.js`：根据参考项目对接 `@system.wearengine` 消息订阅的**受限入口**。没配置手机签名指纹时不会注册；收到文件也不会未经校验自动放入书架。
 - `wear/PeerConfig.js` 和 `config.json` 的 `supportLists` 里有待填写的手机端证书指纹位置。**两处值必须按真实应用签名配置一致**，不能把占位文本当作生产值。
 
+## 构建与安装
+
+- 工程结构已对齐 Lite Wearable 参考示例（`build-profile.json5` 含 `signingConfig`/`strictMode`、`hvigor/hvigor-config.json5`、`entry/hvigorfile.ts`、`resources/base/media/icon{,_small}.png`、`config.json` 的 `"$media:icon"`）。
+- 本地构建：`tools/build_watch_lite.sh debug|release`；需要 DevEco `hvigorw` 与 Lite Wearable SDK，缺失时明确报错，不用 Node 检查冒充构建。
+- CI：`.github/workflows/watch_lite_hap.yml`（自托管 `hmos-deveco` runner；签名材料经 `secrets.WATCH_SIGNING_MATERIAL` 注入；产物只上传 HAP）。
+- 安装步骤与待验证清单：[../../docs/WATCH_INSTALL.md](../../docs/WATCH_INSTALL.md)。
+- **尚未在任何环境完成签名 HAP 构建或 GT 4 实机安装；`6.1.1(24)` 版本号待 GT 4 真机核对。**
+
 ## 未完成
 
 - 手机发书 → 手表接收文件 → 校验 → 加入书架的完整闭环；目前书库里只有内置示例书籍。

@@ -10,7 +10,7 @@
 | 项目入口 | `apps/watch/entry/src/main/config.json` | `apps/phone/entry/src/main/module.json5` |
 | 构建 | 需要匹配 Lite Wearable 的旧式/兼容 SDK、Hvigor Legacy 或对应 DevEco 环境 | 适配 Stage 的 Hvigor + 鸿蒙 CLI |
 | 安装 | 需先验证开发者注册、签名和 DevEco Assistant/HDEA 手机中转安装路径 | HAP 可通过 hdc 安装到手机 |
-| CI 状态 | 未建立 Lite HAP 打包；不可将 Stage HAP 伪装为 GT 4 安装包 | 未建立手机 HAP 打包 |
+| CI 状态 | 已建立 Lite HAP 打包 workflow（自托管 DevEco runner，未实际运行）；尚未产出任何 HAP | 未建立手机 HAP 打包 |
 
 ## 为什么不直接搬其他端内核
 
@@ -19,6 +19,8 @@
 合理复用：TXT/EPUB 结构解析思路、书籍 ID/目录、分页/进度算法、手机传输层的错误处理策略。手表端只留轻量 JS 的文件读写、UTF-8 解码、文本排版和交互。
 
 ## GT 4 Lite HAP：应先解决的事情
+
+工程结构已按 Lite Wearable 参考示例补齐（`signingConfig`、`strictMode`、`hvigor/hvigor-config.json5`、`entry/hvigorfile.ts`、`media/icon{,_small}.png`、`config.json` 的 `"$media:icon"`）。打包流程为 `tools/build_watch_lite.sh` + `.github/workflows/watch_lite_hap.yml`（自托管 `hmos-deveco` runner，签名材料经 Secrets 注入）。**目前尚未在任何环境实际运行该流程，未产出 HAP。**
 
 1. 根据真实 GT 4 系统、开发者注册情况确定 Lite Wearable 对应 SDK 和 DevEco 环境，核对 `targetSdkVersion` / `compatibleSdkVersion` 是否适用于开发安装渠道。
 2. 与 [Lite Wearable 大文本读取示例](https://github.com/Explore-In-HMOS-Wearable/sportwatch-how-to-read-large-text-files) 对齐工程格式，不混入 ArkTS Stage 插件。

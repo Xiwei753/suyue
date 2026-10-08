@@ -20,5 +20,5 @@ assert.ok(phoneIndex.includes('DocumentViewPicker'), 'phone must expose a real d
 assert.ok(phoneIndex.includes('素阅'), 'displayed app name');
 assert.equal(JSON.parse(read('apps/watch/entry/src/main/resources/base/element/string.json')).string[0].value, '素阅');
 assert.ok(read('README.md').startsWith('# 素阅 · suyue'));
-assert.ok(read('docs/BUILD_AND_TRANSFER.md').includes('未建立 Lite HAP'));
+assert.ok(read('docs/BUILD_AND_TRANSFER.md').includes('尚未产出任何 HAP'));
 console.log('PASS: repo structure, watch JS routes, phone picker and branding (static only)');
