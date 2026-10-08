@@ -11,8 +11,15 @@
 - `util/Sha256.js`：纯 JS SHA-256（Lite JS 无加密 API，ES5 兼容），Node 互验通过。
 - `util/Utf8.js`、`util/Base64.js`：纯 JS UTF-8 解码与 base64 解码（运行时无 atob），Node 互验通过。
 - `reader/PageLayout.js`：唯一分页器（编码边界/换行/上下页偏移）。
-- `pages/index`：真实书架（列书名、打开、二次确认删除、空书架提示）；首次启动把旧演示书迁入新书库（迁移桥接，设备验证后删除）。
-- `pages/reader`：按路由 `bookId` 打开；字号 A-/A+ 按当前位置重排；未知 bookId 不崩溃。
+- `reader/ReaderSettings.js`：字号/行距/主题的单一真相；列数/行数由
+  其推导，改变设置按当前字节位置重排，不丢字、不重复、不跳页。
+- `reader/CrownInput.js`：表冠输入。**当前 Lite SDK 无法在源码层确认
+  GT4 表冠能力，明确返回不支持**，阅读页使用触屏上页/下页回退；
+  真机核对出表冠 API 后在此接入，不能伪造“已支持”。
+- `pages/index`：真实书架（列书名、打开、二次确认删除、空书架提示）；
+  首次启动把旧演示书迁入新书库（迁移桥接，设备验证后删除）。
+- `pages/reader`：按路由 `bookId` 打开；字号 A-/A+、日间/夜间主题、
+  行距随设置重排；未知 bookId 不崩溃。
 - `wear/WearReceiver.js`：Wear Engine 适配层，版本检查 + 手机指纹门控，消息路由到 `IncomingBookReceiver`。
 - `wear/PeerConfig.js` 和 `config.json` 的 `supportLists` 里有待填写的手机端证书指纹位置。**两处值必须按真实应用签名配置一致**，不能把占位文本当作生产值。
 

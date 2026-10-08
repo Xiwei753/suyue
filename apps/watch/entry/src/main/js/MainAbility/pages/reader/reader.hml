@@ -1,13 +1,14 @@
-<div class="screen">
+<div class="screen" style="background-color: {{ theme === 'day' ? '#f5f4f0' : '#101114' }};">
   <div class="reading-area">
-    <text class="book-title" onclick="backToLibrary">{{ title }}</text>
-    <text class="book-text" style="font-size: {{ fontSize }}px; line-height: {{ fontSize * 1.55 }}px;">{{ body }}</text>
+    <text class="book-title" style="color: {{ theme === 'day' ? '#5b6470' : '#9da3af' }};" onclick="backToLibrary">{{ title }}</text>
+    <text class="book-text" style="font-size: {{ fontSize }}px; line-height: {{ fontSize * lineHeightRatio }}px; color: {{ theme === 'day' ? '#1c1e22' : '#f3f3f3' }};">{{ body }}</text>
     <div class="controls">
-      <text class="nav" onclick="previousPage">上页</text>
-      <text class="nav" onclick="changeFont(-1)">A-</text>
-      <text class="nav" onclick="changeFont(1)">A+</text>
-      <text class="nav" onclick="nextPage">下页</text>
+      <text class="nav" style="color: {{ theme === 'day' ? '#1c1e22' : '#e8edf5' }};" onclick="previousPage">上页</text>
+      <text class="nav" style="color: {{ theme === 'day' ? '#1c1e22' : '#e8edf5' }};" onclick="changeFont(-1)">A-</text>
+      <text class="nav" style="color: {{ theme === 'day' ? '#1c1e22' : '#e8edf5' }};" onclick="toggleTheme">{{ theme === 'day' ? '夜间' : '日间' }}</text>
+      <text class="nav" style="color: {{ theme === 'day' ? '#1c1e22' : '#e8edf5' }};" onclick="changeFont(1)">A+</text>
+      <text class="nav" style="color: {{ theme === 'day' ? '#1c1e22' : '#e8edf5' }};" onclick="nextPage">下页</text>
     </div>
-    <text class="page-number">{{ pageHint }}</text>
+    <text class="page-number" style="color: {{ theme === 'day' ? '#8a919c' : '#858b96' }};">{{ pageHint }}</text>
   </div>
 </div>

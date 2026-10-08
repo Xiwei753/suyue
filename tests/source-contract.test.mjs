@@ -69,7 +69,9 @@ const watchFiles = [
   'util/Sha256.js',
   'util/Utf8.js',
   'util/Base64.js',
-  'reader/PageLayout.js'
+  'reader/PageLayout.js',
+  'reader/ReaderSettings.js',
+  'reader/CrownInput.js'
 ];
 for (const rel of watchFiles) {
   assert.ok(existsSync('apps/watch/entry/src/main/js/MainAbility/' + rel),
@@ -80,6 +82,13 @@ assert.ok(!watchReader.includes('getDemoBook'),
   'reader must open by bookId, not the demo getter');
 assert.ok(watchReader.includes('router.getParams'),
   'reader must read bookId from router params');
+assert.ok(watchReader.includes('normalizeSettings'),
+  'reader must use ReaderSettings as single truth');
+assert.ok(watchReader.includes('crownSupported'),
+  'reader must gate crown input behind capability check');
+const crownInput = read('apps/watch/entry/src/main/js/MainAbility/reader/CrownInput.js');
+assert.ok(crownInput.includes('return false'),
+  'crown input must not claim support without SDK verification');
 const watchIndex = read('apps/watch/entry/src/main/js/MainAbility/pages/index/index.js');
 assert.ok(watchIndex.includes('listBooks'),
   'index page must list the real library');
