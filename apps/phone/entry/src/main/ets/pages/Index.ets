@@ -1,13 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 手机端首页：真实书库列表 + TXT/EPUB 导入。
-// 选择文件 ≠ 导入成功：只有复制进沙箱、解析、登记后才显示 READY。
-// 发送到 GT 4 在 Wear Engine 接通前保持禁用并说明原因。
+// 手机端首页：真实书库列表 + TXT/EPUB 导入 +
+// Wear Engine 发送到 GT 4。
+// 选择文件 ≠ 导入成功：只有复制进沙箱、解析、
+// 登记后才显示 ready。
+// 发送 ≠ 成功：只有手表回 RESULT ok=true 才算
+// 入库；未选择目标设备时发送保持禁用。
 import { common } from '@kit.AbilityKit';
 import { picker } from '@kit.CoreFileKit';
 import { promptAction } from '@kit.ArkUI';
+import { wearEngine } from '@kit.WearEngine';
 import { BookMeta, BookStatus } from '../model/BookModels';
+import { TargetDevice, TransferProgress,
+  TransferState } from '../model/TransferModels';
 import { importBook } from '../services/BookImportService';
 import { BookRepository } from '../services/BookRepository';
+import { WearDeviceService } from '../services/WearDeviceService';
+import { BookTransferService } from '../services/BookTransferService';
+
+// 包名保留历史命名；指纹必须与手表 supportLists
+// 一致。证书指纹属于签名材料，不写进公开仓库：
+// 从签名配置/安全存储读取，未配置时发送明确禁用。
+const BUNDLE_NAME = 'com.xiwei753.gt4reader.phone';
 
 @Entry
 @Component
@@ -16,7 +29,15 @@ struct Index {
   @State private pickedName: string = '尚未选择书籍';
   @State private pickStatus: string = '可选择 TXT 或 EPUB 文件';
   @State private busy: boolean = false;
+  @State private devices: TargetDevice[] = [];
+  @State private selectedDevice: number = -1;
+  @State private deviceStatus: string = '未发现已连接的 GT 4';
+  @State private transferText: string = '未开始传输';
+  @State private sending: boolean = false;
   private repository: BookRepository | null = null;
+  private deviceService: WearDeviceService | null = null;
+  private transferService: BookTransferService | null = null;
+  private phoneFingerprint: string = '';
 
   private getRepository(): BookRepository {
     if (this.repository === null) {
@@ -27,12 +48,68 @@ struct Index {
     return this.repository;
   }
 
+  private getDeviceService(): WearDeviceService {
+    if (this.deviceService === null) {
+      const context = this.getUIContext().getHostContext()
+        as common.UIAbilityContext;
+      this.deviceService = new WearDeviceService(context);
+      this.transferService = new BookTransferService(
+        context, this.deviceService);
+    }
+    return this.deviceService;
+  }
+
   onPageShow(): void {
     this.refresh();
+    this.refreshDevices();
   }
 
   private refresh(): void {
     this.books = this.getRepository().list();
+  }
+
+  // 设备发现：列出已连接设备，由用户选择，
+  // 不默认第一台。
+  private async refreshDevices(): Promise<void> {
+    try {
+      const devices = await this.getDeviceService()
+        .listDevices();
+      this.devices = devices;
+      this.deviceStatus = devices.length > 0 ?
+        '发现 ' + devices.length + ' 台已连接设备，请选择目标' :
+        '未发现已连接的 GT 4（请确认配对与蓝牙）';
+      this.selectedDevice = -1;
+    } catch (e) {
+      this.devices = [];
+      this.deviceStatus = '设备发现失败：Wear Engine 不可用';
+      this.selectedDevice = -1;
+    }
+  }
+
+  private async selectDevice(e: number): Promise<void> {
+    if (e < 0 || e >= this.devices.length) return;
+    this.selectedDevice = e;
+    const device = this.devices[e];
+    this.deviceStatus = '已选择：' + device.name;
+    if (this.phoneFingerprint.length === 0) {
+      this.deviceStatus += '；未配置手机签名指纹，' +
+        '发送将保持禁用';
+    }
+    // 注册手表 → 手机的消息接收（RESULT 回执）。
+    if (this.phoneFingerprint.length > 0 &&
+        this.transferService !== null) {
+      try {
+        await this.getDeviceService()
+          .registerMessageReceiver(
+            device, BUNDLE_NAME, this.phoneFingerprint,
+            (message: wearEngine.P2pMessage) => {
+              this.transferService!.onMessageFromWatch(
+                message.content);
+            });
+      } catch (error) {
+        this.deviceStatus += '；消息接收注册失败';
+      }
+    }
   }
 
   private async chooseBook(): Promise<void> {
@@ -90,6 +167,48 @@ struct Index {
     }
   }
 
+  private canSend(): boolean {
+    return this.selectedDevice >= 0 &&
+      this.phoneFingerprint.length > 0 &&
+      !this.sending;
+  }
+
+  private async sendBook(book: BookMeta): Promise<void> {
+    if (!this.canSend() || this.transferService === null) {
+      this.transferText = '发送不可用：请先选择设备并配置签名指纹';
+      return;
+    }
+    if (book.status !== BookStatus.READY) {
+      this.transferText = '书籍未就绪，不能发送';
+      return;
+    }
+    const device = this.devices[this.selectedDevice];
+    this.sending = true;
+    this.transferText = '正在发送《' + book.title + '》……';
+    const ok = await this.transferService.sendBook(
+      book, device, BUNDLE_NAME, this.phoneFingerprint,
+      {
+        onProgress: (progress: TransferProgress) => {
+          this.transferText = progress.message +
+            (progress.percent > 0 &&
+              progress.state === TransferState.SENDING ?
+              '（' + progress.percent + '%）' : '');
+        }
+      });
+    this.sending = false;
+    if (ok) {
+      this.transferText = '《' + book.title + '》手表已确认入库';
+      this.getRepository().markStatus(book.bookId,
+        BookStatus.SENT);
+    } else {
+      this.transferText = '发送失败：手表未确认入库';
+      this.getRepository().markStatus(book.bookId,
+        BookStatus.TRANSFER_FAILED,
+        'watch did not confirm');
+    }
+    this.refresh();
+  }
+
   @Builder
   bookItem(book: BookMeta) {
     Row() {
@@ -112,10 +231,18 @@ struct Index {
         .fontColor(book.status === BookStatus.READY ?
           '#4ade80' : '#f87171')
 
+      Button('发送')
+        .fontSize(12)
+        .height(28)
+        .enabled(this.canSend() &&
+          book.status === BookStatus.READY)
+        .margin({ left: 12 })
+        .onClick(() => { this.sendBook(book); })
+
       Text('删除')
         .fontSize(13)
         .fontColor('#f87171')
-        .margin({ left: 16 })
+        .margin({ left: 12 })
         .onClick(() => { this.removeBook(book); })
     }
     .width('100%')
@@ -177,10 +304,27 @@ struct Index {
       Column({ space: 8 }) {
         Text('发送到 GT 4').fontSize(22)
           .fontWeight(FontWeight.Medium).fontColor('#f2f2f2')
-        Text('Wear Engine 传输尚未接通：设备发现、签名核对与 ' +
-          'transferFile 未实现，发送保持禁用。')
-          .fontSize(14)
-          .fontColor('#a7abb4')
+        Text(this.deviceStatus).fontSize(14).fontColor('#a7abb4')
+        if (this.devices.length > 0) {
+          Row() {
+            ForEach(this.devices, (device: TargetDevice,
+              index: number) => {
+              Button(device.name)
+                .fontSize(12)
+                .height(28)
+                .backgroundColor(this.selectedDevice === index ?
+                  '#344259' : '#101114')
+                .margin({ right: 8 })
+                .onClick(() => { this.selectDevice(index); })
+            }, (device: TargetDevice) => device.randomId)
+          }
+        }
+        Button('刷新设备')
+          .fontSize(13)
+          .height(28)
+          .onClick(() => { this.refreshDevices(); })
+        Text(this.transferText).fontSize(14)
+          .fontColor(this.sending ? '#facc15' : '#a7abb4')
       }
       .alignItems(HorizontalAlign.Start)
       .padding(20)

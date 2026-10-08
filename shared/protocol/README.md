@@ -30,6 +30,35 @@
 - 未协商或协商失败时，发送方必须停止并报 `E_PROTOCOL`，
   不得擅自假定块大小。
 
+### SDK 映射（以华为 Wear Engine 示例为准，待真机验证）
+
+手机侧（ArkTS Stage，`@kit.WearEngine`）：
+
+- 控制消息（HELLO/BOOK_META/ERROR 等 JSON）：
+  `p2pClient.sendMessage(device.randomId, appParam,
+  P2pMessage{content: Uint8Array})`
+- 整本正文：`p2pClient.transferFile(device.randomId,
+  appParam, P2pFile{file: fs.openSync(path)},
+  (error, result) => …)`，回调 `result.progress`
+  上报进度；**回调成功不等于入库成功**，必须等
+  手表 `RESULT`。
+- 回执接收：`p2pClient.registerMessageReceiver(
+  device.randomId, appParam, callback)`，
+  手表的 RESULT/ACK 经此回到手机。
+- `appParam = { remoteApp: { bundleName, fingerprint } }`，
+  手机 fingerprint 必须与手表 `supportLists`
+  配置一致。
+
+手表侧（Lite JS，`@system.wearengine`）：
+
+- 消息订阅：`wearengine.subscribeMsg`，
+  `data.message` 为 JSON 控制消息；
+- 文件到达：`data.isFileType` 回调给出文件句柄，
+  读取后走整本 SHA-256 校验（字段以真机为准，
+  当前为待验证）；
+- 回执发送 API（sendMessage 类）以 Lite SDK
+  实际能力为准，当前由页面层注入发送函数。
+
 ## 消息 envelope
 
 所有消息均为 JSON 对象，必含 `v`（协议版本，当前 `0`）与 `type`。

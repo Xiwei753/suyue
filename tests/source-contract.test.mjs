@@ -28,11 +28,22 @@ assert.equal(JSON.parse(read('apps/watch/entry/src/main/resources/base/element/s
 assert.ok(phoneAppJson.app.icon === '$media:app_icon', 'phone app icon must exist');
 assert.ok(existsSync('apps/phone/AppScope/resources/base/media/app_icon.png'));
 for (const svc of ['BookImportService', 'TextDecodeService',
-  'EpubImportService', 'BookRepository', 'ZipReader']) {
+  'EpubImportService', 'BookRepository', 'ZipReader',
+  'WearDeviceService', 'BookTransferService']) {
   assert.ok(existsSync('apps/phone/entry/src/main/ets/services/' + svc + '.ets'),
     'phone service missing: ' + svc);
 }
 assert.ok(existsSync('apps/phone/entry/src/main/ets/model/BookModels.ets'));
+assert.ok(existsSync('apps/phone/entry/src/main/ets/model/TransferModels.ets'));
+const phoneIndexFull = read('apps/phone/entry/src/main/ets/pages/Index.ets');
+assert.ok(phoneIndexFull.includes('listDevices'),
+  'phone index must discover devices');
+assert.ok(phoneIndexFull.includes('registerMessageReceiver'),
+  'phone index must register for watch RESULT');
+assert.ok(phoneIndexFull.includes('RESULT'),
+  'phone must wait for watch RESULT receipt');
+assert.ok(phoneIndexFull.includes('transferService'),
+  'phone index must use BookTransferService');
 assert.ok(read('README.md').startsWith('# 素阅 · suyue'));
 assert.ok(read('docs/BUILD_AND_TRANSFER.md').includes('尚未产出任何 HAP'));
 const protocolReadme = read('shared/protocol/README.md');

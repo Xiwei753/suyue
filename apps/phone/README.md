@@ -17,10 +17,26 @@
 - `services/BookRepository.ets`：`library.json` 索引，重启不丢书，
   重复导入幂等，删除同时清理索引与正文文件。
 - `model/BookModels.ets`：BookMeta/Chapter/Status 统一模型。
+- `services/WearDeviceService.ets`：Wear Engine 设备发现
+  （`getConnectedDevices`）、`isRemoteAppInstalled` 核对、
+  `registerMessageReceiver` 回执接收；设备由用户选择，
+  不默认第一台。
+- `services/BookTransferService.ets`：按协议序列发送
+  HELLO → BOOK_META → `transferFile` 文件通道 →
+  等手表 RESULT；进度/取消/超时/重试（只重试可恢复
+  错误）；**transferFile 回调成功不等于入库**，
+  以手表 RESULT 为准。
+- `model/TransferModels.ets`：传输进度/状态/错误码
+  （与协议错误码对齐）。
+- `pages/Index.ets`：书架列表 + 设备选择 + 发送，
+  实时进度/失败提示；未选设备或未配置指纹时
+  发送禁用。
 
 ## 未完成
 
-- Wear Engine 设备发现与 `transferFile` 发送（阶段 5）。
+- Wear Engine 真机互通（GT 4 + Pocket 2）：设备发现、
+  签名指纹核对、`transferFile` 与回执时序均**待验证**。
+- 手机签名指纹读取（当前为空，发送保持禁用）。
 - 在 Pocket 2 上编译、签名、安装与真机验证（当前没有编译产物）。
 - GBK 解码在目标系统的实际可用性属于**待验证**项。
 
