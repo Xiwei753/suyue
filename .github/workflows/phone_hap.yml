@@ -1,0 +1,63 @@
+name: Phone Stage HAP build (self-hosted DevEco required)
+# 源码检查（pagination-test.yml）不等于 HAP 构建。本 workflow 必须运行在
+# 已安装 HarmonyOS Stage (API 26) DevEco 工具链的自托管 runner 上。
+on:
+  push:
+    branches: [auto-issue-1, main]
+    paths:
+      - 'apps/phone/**'
+      - 'tools/build_phone_hap.sh'
+      - 'tests/build_artifact_check.sh'
+      - '.github/workflows/phone_hap.yml'
+  workflow_dispatch:
+
+jobs:
+  phone-hap:
+    runs-on: [self-hosted, hmos-deveco]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify signing material is present
+        env:
+          PHONE_SIGNING_MATERIAL: ${{ secrets.PHONE_SIGNING_MATERIAL }}
+        run: |
+          if [ -z "$PHONE_SIGNING_MATERIAL" ]; then
+            echo "ERROR: 签名材料缺失（secrets.PHONE_SIGNING_MATERIAL 未配置）。" >&2
+            echo "未签名构建不能标记为成功；请先配置手机 Stage 签名材料。" >&2
+            exit 1
+          fi
+
+      - name: Materialize signing config (temporary, cleaned up)
+        env:
+          PHONE_SIGNING_MATERIAL: ${{ secrets.PHONE_SIGNING_MATERIAL }}
+        run: |
+          # 签名材料由环境变量注入，临时落盘，构建后立即删除，日志不回显内容。
+          mkdir -p apps/phone/signing
+          printf '%s' "$PHONE_SIGNING_MATERIAL" > apps/phone/signing/material.json5
+          trap 'rm -rf apps/phone/signing' EXIT
+          echo "signing material staged (content hidden)"
+
+      - name: Build Stage HAP
+        run: tools/build_phone_hap.sh release
+
+      - name: Locate HAP
+        id: hap
+        run: |
+          HAP="$(find apps/phone/entry/build/default/outputs/default -name 'entry-default-*.hap' -type f | head -n 1)"
+          echo "path=$HAP" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$HAP")" >> "$GITHUB_OUTPUT"
+          echo "size=$(stat -c%s "$HAP")" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$HAP" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Report artifact identity
+        run: |
+          echo "HAP name: ${{ steps.hap.outputs.name }}"
+          echo "HAP size: ${{ steps.hap.outputs.size }} bytes"
+          echo "HAP sha256: ${{ steps.hap.outputs.sha256 }}"
+
+      - name: Upload Stage HAP only
+        uses: actions/upload-artifact@v4
+        with:
+          name: suyue-phone-hap
+          path: ${{ steps.hap.outputs.path }}
+          if-no-files-found: error

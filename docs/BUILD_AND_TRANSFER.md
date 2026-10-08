@@ -10,7 +10,7 @@
 | 项目入口 | `apps/watch/entry/src/main/config.json` | `apps/phone/entry/src/main/module.json5` |
 | 构建 | 需要匹配 Lite Wearable 的旧式/兼容 SDK、Hvigor Legacy 或对应 DevEco 环境 | 适配 Stage 的 Hvigor + 鸿蒙 CLI |
 | 安装 | 需先验证开发者注册、签名和 DevEco Assistant/HDEA 手机中转安装路径 | HAP 可通过 hdc 安装到手机 |
-| CI 状态 | 已建立 Lite HAP 打包 workflow（自托管 DevEco runner，未实际运行）；尚未产出任何 HAP | 未建立手机 HAP 打包 |
+| CI 状态 | 已建立 Lite HAP 打包 workflow（自托管 DevEco runner，未实际运行）；尚未产出任何 HAP | 已建立 Stage HAP 打包 workflow（自托管 DevEco runner，未实际运行）；尚未产出任何 HAP |
 
 ## 为什么不直接搬其他端内核
 
@@ -31,11 +31,18 @@
 
 ## 手机端实现顺序
 
-1. `DocumentViewPicker` 获取 TXT/EPUB 的文件 URI（仅此步已有代码；真机待测）。
-2. 读取内容并复制到应用内书库。TXT 识别编码（UTF-8、GBK 等），EPUB 在手机解析为 UTF-8 章节。
-3. 用 [Wear Engine Kit 手机侧 ArkTS API](https://developer.huawei.com/consumer/cn/doc/doccenter-references/api/wearengine_api) 做设备发现与授权。
-4. 将书籍规范化、写入临时文件，调用手机侧 `P2pClient.transferFile`；也可使用 `sendMessage` 发送控制/ACK 消息。API 支持并不保证当前 GT 4 配对与签名权限已经打通。
-5. 手表注册接收、校验大小/摘要，安全落盘并更新书架，成功后由手表回执，不能只凭手机侧回调就认定入库成功。
+1. `DocumentViewPicker` 获取 TXT/EPUB 的文件 URI（已实现选择）。
+2. TXT：`TextDecodeService` 识别编码（BOM/UTF-8 校验/GBK 候选），
+   `BookImportService` 复制进沙箱并规范化 UTF-8；GBK 解码可用性**待真机验证**。
+3. EPUB：`ZipReader`（纯 JS inflate，含穿越/bomb/CRC 防护）+
+   `EpubImportService` 按 OPF/spine 顺序清洗章节；仅无 DRM。
+4. `BookRepository` 维护 `library.json` 索引，重启不丢书。
+5. 用 [Wear Engine Kit 手机侧 ArkTS API](https://developer.huawei.com/consumer/cn/doc/doccenter-references/api/wearengine_api) 做设备发现与授权（阶段 5，尚未实现）。
+6. 将书籍规范化、写入临时文件，调用手机侧 `P2pClient.transferFile`；也可使用 `sendMessage` 发送控制/ACK 消息。API 支持并不保证当前 GT 4 配对与签名权限已经打通。
+7. 手表注册接收、校验大小/摘要，安全落盘并更新书架，成功后由手表回执，不能只凭手机侧回调就认定入库成功。
+
+手机端打包：`tools/build_phone_hap.sh` + `.github/workflows/phone_hap.yml`
+（自托管 `hmos-deveco` runner，签名材料经 Secrets 注入）。**目前尚未在任何环境实际运行该流程，未产出 HAP。**
 
 ## 现有源码不能直接认定兼容的地方
 

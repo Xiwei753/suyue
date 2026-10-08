@@ -13,7 +13,7 @@
 ## 已写入的源码
 
 - 手表本地生成一份长中文测试书、按字节读取与估算分页、前后翻页和进度 JSON；未实机验证。
-- 手机可调用系统文档选择器选择 TXT/EPUB 的 URI；**尚未读取或导入书籍正文**。
+- 手机端实现 TXT/EPUB 导入：文档选择器 → 授权 URI 分块读取 → 编码识别/EPUB 解包 → 规范化 UTF-8 写入沙箱 → 书库索引；**尚未在 DevEco 编译或真机验证**。
 - Wear Engine 消息接收入口在手机指纹尚未配置时停用；未完成真实传书。
 - 第三方示例借鉴、原作者 MIT 声明：[来源说明](docs/REFERENCES.md)、[版权说明](third_party/NOTICE.md)。
 - Node 分页回归测试可运行；**CI 通过不等于 HAP 构建成功**。
@@ -26,10 +26,11 @@
 
 - 手表 Lite Wearable 与手机 Stage 必须分开编译、分开签名，不要混用构建工具链。
 - 手表打包：`tools/build_watch_lite.sh` + `.github/workflows/watch_lite_hap.yml`（自托管 DevEco runner；签名材料经 Secrets 注入）。**尚未实际运行，未产出 HAP**；安装与待验证清单见 [docs/WATCH_INSTALL.md](docs/WATCH_INSTALL.md)。
+- 手机打包：`tools/build_phone_hap.sh` + `.github/workflows/phone_hap.yml`（自托管 DevEco runner；签名材料经 Secrets 注入）。**尚未实际运行，未产出 HAP**。
 - 首先验证 GT 4 46mm 支持哪组 Lite SDK/IDE + 签名 + DevEco Assistant 安装流程，才配置真正能产生 signed HAP 的 CI。
 - 手机端可借鉴已有鸿蒙 NEXT CLI 构建流程，**但需要独立应用证书和本项目构建配置**；素笺的打包脚本不能原封不动使用。
 - 详细状态、环境差异和验收清单见 [开发与安装路线](docs/BUILD_AND_TRANSFER.md)。
-- 当前仅有源码检查与分页测试，尚未进行两端 DevEco 编译或设备验证。
+- 当前仅有源码检查与分页/ZIP 测试，尚未进行两端 DevEco 编译或设备验证。
 
 ## 项目目录
 
