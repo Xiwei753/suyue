@@ -1,36 +1,48 @@
 .screen {
   width: 100%;
   height: 100%;
-  background-color: #101114;
   display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
-  align-items: center;
+  background-color: #101114;
 }
-.reading-area {
+.panel {
   width: 316px;
-  height: 316px;
+  height: 300px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   align-items: center;
+  justify-content: center;
 }
-.book-title {
-  font-size: 19px;
-  color: #9da3af;
+.heading {
+  width: 100%;
+  font-size: 26px;
+  color: #f2f2f2;
   text-align: center;
-  width: 100%;
+  margin-bottom: 20px;
 }
-.book-text {
-  font-size: 22px;
-  line-height: 33px;
-  color: #f4f4f4;
-  width: 100%;
-  text-align: left;
-}
-.page-number {
-  font-size: 16px;
-  color: #858b96;
-  width: 100%;
+.book {
+  width: 280px;
+  height: 65px;
+  font-size: 23px;
   text-align: center;
+  color: #ffffff;
+  background-color: #344259;
+  border-radius: 14px;
+  padding: 15px;
+}
+.hint {
+  width: 100%;
+  margin-top: 16px;
+  font-size: 15px;
+  text-align: center;
+  color: #aeb6c4;
+}
+.foot {
+  width: 100%;
+  margin-top: 12px;
+  font-size: 14px;
+  text-align: center;
+  color: #8b929d;
 }

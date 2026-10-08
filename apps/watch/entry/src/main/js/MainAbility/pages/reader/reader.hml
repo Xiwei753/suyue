@@ -1,0 +1,11 @@
+<div class="screen">
+  <div class="reading-area">
+    <text class="book-title" onclick="backToLibrary">{{ title }}</text>
+    <text class="book-text">{{ body }}</text>
+    <div class="controls">
+      <text class="nav" onclick="previousPage">上页</text>
+      <text class="nav" onclick="nextPage">下页</text>
+    </div>
+    <text class="page-number">{{ pageHint }}</text>
+  </div>
+</div>

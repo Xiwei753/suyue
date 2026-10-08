@@ -1,22 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 原创演示页：仅内置几段短文本，不代表长文本分页已经完成。
-const DEMO_PAGES = [
-  '这是 GT 4 圆屏阅读测试。\n\n文字尽量留在表盘内侧，避免被圆形边缘裁掉。\n\n点击屏幕翻到下一页。',
-  '第二页：\n\n手表只负责阅读 UTF-8 文本。\n\n手机负责解析 TXT 和 EPUB，再将内容发送到手表。',
-  '第三页：\n\n离线书库、章节目录、进度保存和表冠翻页都还没有实现。\n\n下一次点击回到第一页。'
-];
+import router from '@system.router';
+import { initializeLibrary, getDemoBook } from '../../storage/BookFiles';
+import { beginReceive, stopReceive } from '../../wear/WearReceiver';
 
 export default {
   data: {
-    bookTitle: '阅读演示',
-    pageText: DEMO_PAGES[0],
-    pageLabel: '1 / 3',
-    pageIndex: 0
+    title: 'GT4 Reader',
+    demoTitle: '中文阅读测试',
+    status: '正在准备本地书库',
+    ready: false,
+    transferStatus: '传书未配置'
   },
-  nextPage() {
-    const next = (this.pageIndex + 1) % DEMO_PAGES.length;
-    this.pageIndex = next;
-    this.pageText = DEMO_PAGES[next];
-    this.pageLabel = `${next + 1} / ${DEMO_PAGES.length}`;
+  onInit() {
+    this.demoTitle = getDemoBook().title;
+    initializeLibrary((result) => {
+      this.ready = result.ok;
+      this.status = result.ok ? '本地测试书已就绪' : '本地文件初始化失败：' + result.reason;
+    });
+    beginReceive((message) => { this.transferStatus = message; });
+  },
+  onDestroy() {
+    stopReceive();
+  },
+  openDemo() {
+    if (!this.ready) {
+      this.status = '书籍尚未准备好，无法打开';
+      return;
+    }
+    router.push({ uri: 'pages/reader/reader', params: { bookId: 'demo' } });
   }
 };

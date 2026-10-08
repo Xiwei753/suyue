@@ -1,7 +1,8 @@
-<div class="screen" onclick="nextPage">
-  <div class="reading-area">
-    <text class="book-title">{{ bookTitle }}</text>
-    <text class="book-text">{{ pageText }}</text>
-    <text class="page-number">{{ pageLabel }}</text>
+<div class="screen">
+  <div class="panel">
+    <text class="heading">{{ title }}</text>
+    <text class="book" onclick="openDemo">{{ demoTitle }}</text>
+    <text class="hint">{{ status }}</text>
+    <text class="foot">{{ transferStatus }}</text>
   </div>
 </div>

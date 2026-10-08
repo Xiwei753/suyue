@@ -2,51 +2,48 @@
 
 面向 **HUAWEI WATCH GT 4 46 mm（466 × 466 圆屏）** 的个人离线阅读器，以及配套的鸿蒙手机传书应用。
 
-> 状态：**开发骨架 / 尚未真机验证**。本仓库目前不包含可直接安装的 HAP，也不声称手机与 GT 4 之间的文件传输已经打通。
+> 当前状态：**手表本地阅读原型；未编译、未实机验证；手机传书仍未接通。** 没有可直接安装的 HAP。
 
 ## 项目目标
 
-- **手表端**（HarmonyOS Lite Wearable，JS/HML/CSS）：圆屏安全区域排版、离线 TXT 阅读、进度保存，后续支持表冠翻页、目录和字号调整。
-- **手机端**（HarmonyOS NEXT / ArkTS）：导入 TXT、EPUB；在手机端转换文本和拆分章节；通过 Wear Engine 将书发送到 GT 4。
-- **共享协议**：规定设备发现、分块传输、确认、校验和断点恢复的消息格式；所有上限以真机验证结果为准。
+- **手表端**（HarmonyOS Lite Wearable，JS/HML/CSS）：圆屏安全区排版、离线 TXT 阅读、进度保存、以后支持表冠翻页/目录/字号。
+- **手机端**（HarmonyOS NEXT / ArkTS）：TXT / EPUB 导入与转换、章节整理、Wear Engine 传书。
+- **共享协议**：手机→手表的分块、回执、校验、失败恢复。
 
-## 仓库结构
+## 结构
 
 ```text
 apps/
-  watch/       GT 4 Lite Wearable 的独立 DevEco 工程（示例阅读页）
-  phone/       鸿蒙 NEXT 手机端的独立 DevEco 工程（首页骨架）
+  watch/       Lite Wearable 工程：书架、文件操作、分页、进度、Wear Engine 接收入口
+  phone/       ArkTS Stage 手机端静态首页（导入/传书待实现）
 shared/
   protocol/    双端传书协议草案
 docs/
-  ARCHITECTURE.md    实现边界与开发顺序
-  REFERENCES.md      借鉴项目、来源与许可证说明
+  ARCHITECTURE.md
+  REFERENCES.md
+third_party/
+  NOTICE.md    MIT 示例来源及版权保留
+  licenses/    所借鉴源码的对应许可证
 ```
 
-## 当前能做什么
+## 已实现（源码级，非真机已验证）
 
-- 手表端是**内置测试文本的圆屏阅读演示**，可以点击翻到下一页；不是完整书籍阅读器。
-- 手机端是**书库/传书入口的界面骨架**；目前不执行文件导入、传输。
-- 两个端暂时**没有连接**。代码内保留明确的待实现边界，不用假传书按钮冒充完成。
+- 手表首页进入本地中文测试书；首次启动向 `internal://app/gt4reader` 写入一份超过 4096 字节的 TXT。
+- 通过 `@system.file.readArrayBuffer` 按文件**字节偏移**读取，`PageLayout` 解码 UTF-8 并形成估算长度的一页；前后翻页，保存最近进度。
+- 接入 Wear Engine 消息订阅入口；当真实签名指纹未配置时会明确停用。收到文件不自动信任或导入。
+- 参考 [3 个 GT 4 Lite Wearable MIT 示例](docs/REFERENCES.md) 的文件和通信接口；第三方来源、原版权及完整 MIT 条款详见 [NOTICE](third_party/NOTICE.md)。
+- 轻量分页逻辑附不依赖第三方包的 Node 回归测试：`node --experimental-default-type=module tests/pagination.test.mjs`。
 
-## 开发顺序
+## 还没有完成
 
-1. 在 GT 4 46 mm 真机上编译、安装并校准圆屏字体和手势。
-2. 手表端完成本地文本分块读取、书籍目录、页码与进度存取。
-3. 手机端完成 TXT 导入、UTF-8 转换和 EPUB 转章节；加上手机端书库。
-4. 完成双端 Wear Engine 配对、分块传输、校验、失败恢复。
-5. 接入表冠翻页、字号设置、进度同步，再考虑额外功能。
+- 从手机导入 TXT/EPUB、转换、发送书籍，以及手表接收后验证并加入书架的整套链路。
+- 多书书架、真正的章节目录、表冠翻页、屏幕字形像素测量、存储/耗电压力测试。
+- GT 4 专用 DevEco 构建、签名、安装验证；目前不能保证 HAP 能一次通过。
 
-详见 [架构与验收](docs/ARCHITECTURE.md)、[协议草案](shared/protocol/README.md) 和 [参考项目](docs/REFERENCES.md)。
+## 构建与安装
 
-## 构建提示
+手表端用支持 Lite Wearable 的 DevEco Studio 打开 `apps/watch`；手机端用支持 ArkTS Stage 的 DevEco Studio 打开 `apps/phone`。二者签名分别配置，证书/私钥不可提交。**目前不提供“下载即用”的安装包。**
 
-- `apps/watch` 使用 Lite Wearable（**不是** ArkTS Stage 或 Wear OS），需在支持该类型设备的 DevEco Studio 中打开工程并配置开发者签名。
-- `apps/phone` 使用 ArkTS Stage 手机应用工程，需配置自己的证书及设备调试环境。
-- 本仓库不提交证书、私钥、HAP、构建产物和第三方 SDK。**当前未进行 CI / 真机编译验证**。
+## 授权
 
-## 许可证
-
-本项目原创代码采用 **GNU GPL v3.0 only**，见 [LICENSE](LICENSE)（SPDX: `GPL-3.0-only`）。
-
-参考项目不代表已作为本仓库的源码、库或依赖引入。以后如复制 MIT 授权的源文件，需要同时保留对应的原作者版权声明与 MIT 许可证文字，详见 [docs/REFERENCES.md](docs/REFERENCES.md)。
+原创代码按 [GPL-3.0-only](LICENSE) 发布；借鉴或改造的 MIT 示例保留原许可证及版权声明；未打包原华为 Wear Engine SDK wrapper（Apache-2.0）。见 [REFERENCES](docs/REFERENCES.md)。

@@ -1,0 +1,59 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// 纯 JavaScript UTF-8 流读取和简易圆屏分页；不依赖浏览器 TextDecoder。
+// 宽度是粗略估算，实际像素分页仍需 GT4 46mm 真机校准。
+export function decodeAt(bytes, pos) {
+  const b0 = bytes[pos];
+  if (b0 === undefined) return null;
+  if (b0 < 128) return { char: String.fromCharCode(b0), size: 1 };
+  const width = b0 >= 0xF0 && b0 <= 0xF4 ? 4 :
+    b0 >= 0xE0 && b0 <= 0xEF ? 3 : b0 >= 0xC2 && b0 <= 0xDF ? 2 : 0;
+  if (!width) return { char: '\uFFFD', size: 1 };
+  if (pos + width > bytes.length) return null;
+  for (let i = 1; i < width; i++) {
+    if ((bytes[pos + i] & 0xC0) !== 0x80) return { char: '\uFFFD', size: 1 };
+  }
+  const b1 = bytes[pos + 1];
+  const b2 = bytes[pos + 2];
+  const b3 = bytes[pos + 3];
+  const code = width === 2 ? ((b0 & 31) << 6) | (b1 & 63) :
+    width === 3 ? ((b0 & 15) << 12) | ((b1 & 63) << 6) | (b2 & 63) :
+    ((b0 & 7) << 18) | ((b1 & 63) << 12) | ((b2 & 63) << 6) | (b3 & 63);
+  if (code > 0x10FFFF || code >= 0xD800 && code <= 0xDFFF ||
+      width === 2 && code < 0x80 || width === 3 && code < 0x800 ||
+      width === 4 && code < 0x10000) {
+    return { char: '\uFFFD', size: 1 };
+  }
+  if (code <= 0xFFFF) return { char: String.fromCharCode(code), size: width };
+  const pair = code - 0x10000;
+  return { char: String.fromCharCode(0xD800 + (pair >> 10), 0xDC00 + (pair & 1023)), size: width };
+}
+
+// 利用真实字节位置分页，返回下一页的 byteOffset；不跳过未显示的字。
+export function takePage(bytes, offset, columns, maxRows) {
+  const cols = columns || 14;
+  const rowsLimit = maxRows || 7;
+  let used = 0;
+  let row = 1;
+  let col = 0;
+  let text = '';
+  while (used < bytes.length) {
+    const item = decodeAt(bytes, used);
+    if (!item) break; // 读块尾部出现半个 UTF-8 字符，不能把它当有效字符。
+    const ch = item.char;
+    if (ch === '\r') { used += item.size; continue; }
+    if (ch === '\n') {
+      if (row >= rowsLimit) break;
+      text += '\n'; row++; col = 0; used += item.size; continue;
+    }
+    const cp = ch.codePointAt(0);
+    const advance = cp <= 0x7F ? (ch === '\t' ? 2 : 0.55) : 1;
+    if (col + advance > cols) {
+      if (row >= rowsLimit) break;
+      row++; col = 0;
+    }
+    text += ch;
+    col += advance;
+    used += item.size;
+  }
+  return { text: text, offset: offset, nextOffset: offset + used, eof: used === bytes.length };
+}
