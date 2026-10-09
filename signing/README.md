@@ -11,15 +11,16 @@
 | 文件 | 是什么 | 能否复用 |
 |---|---|---|
 | `shared-signing-key.p12` | ECDSA P-256 私钥。别名 `sujian_signing_20261007` | **可复用**（见下） |
-| `suyue-debug.cer` | **手机**（`com.xiwei.suyue`）的**调试**证书，华为签发 | 按应用签发 |
+| `suyue-debug.cer` | 现有调试证书，和 `.p12` 私钥匹配 | 同一账号下用途兼容时可跨应用复用 |
 | `suyue-debug.p7b` | **手机**的**调试** provisioning profile | 按应用签发 |
 | `credentials.env` | p12 的别名与口令（`KEY_ALIAS`/`STORE_PASSWORD`/`KEY_PASSWORD`） | — |
 
-## 为什么私钥可以复用，证书和 profile 不能
+## 私钥和匹配证书可以复用，但 profile 不能跨包名复用
 
 这一点此前文档写成了"素笺的证书不能复用"，容易读成整套材料都不能用，
 **不准确**。实际情况是：AGC 的调试证书是从提交的 CSR 签发的，只要
-**同一对密钥**就可以为不同应用分别签发证书和 profile。
+**同一对密钥**可以在用途与签名类型兼容时跨应用使用同一有效证书，
+但各包名必须分别申请匹配的 profile（.p7b）。
 
 用公钥指纹实测核对（`openssl pkey -pubin -outform DER | openssl dgst -sha256`）：
 
@@ -30,7 +31,7 @@
 
 两者完全一致 → 素笺那把私钥就是素阅的私钥，签名可以直接用。
 
-但 **证书和 profile 是按应用走的**：`suyue-debug.p7b` 里
+但 **profile 是按应用走的**：`suyue-debug.p7b` 里
 
 - `bundle-name`: `com.xiwei.suyue`
 - `type`: `debug`，`device-ids` 绑定了 2 个 UDID（`device-id-type: udid`）
@@ -55,7 +56,7 @@ profile 绑定包名，**它授权的是 `com.xiwei.suyue`**。
   已加包名预检：profile 授权的包名与 HAP 不一致时**拒绝签名**并退回
   未签名产物。这个坑很隐蔽——拿手机的 profile 签手表 HAP，
   `hap-sign-tool` 照样报 `Sign Hap success!`，但设备按包名校验会拒绝安装。
-- 手表自己的证书/profile 一旦签发，放进来即可自动启用签名
+- 手表自己的 profile 一旦按手表包名签发，可配合现有有效且用途兼容的证书；放进来即可自动启用签名
   （文件名不限，取目录下第一个 `.p12` / `.cer` / `.p7b`）。
 
 ## 用法
@@ -67,8 +68,9 @@ profile 绑定包名，**它授权的是 `com.xiwei.suyue`**。
 - **不要用 hvigor 的 `signingConfigs`**：本机实测在该 legacy Lite 工程上
   `SignHap` 直接失败（`00308018 ENOENT: stat '<dir>/material'`），
   即使配置形状与 Stage 工程一致。素笺 CI 用的也是下面的绕行路径。
-- **CI（尚未同步）**：`watch_lite_hap.yml` 目前仍走
-  `tools/inject_signing.py` 写 `signingConfigs` 的方式——即上述被证伪的
-  那条，需要改成与本地脚本一致的 `sign-app` + `verify-app`。
+- **CI（源码已修，仍待 runner 执行）**：`watch_lite_hap.yml` 改用
+  `inject_signing.py --external-signing` 只注入身份/Manifest，并将签名凭据
+  放在临时目录；`build_watch_lite.sh` 负责 `sign-app` + `verify-app`。
+  自托管 runner 尚未执行，不能视为 CI 成功。
 - 注意 `verify-app` 的 `-outCertChain` 必须用 `.cer` 后缀；
   用 `.crt` 会报 `Error Message: Not support file`（实测）。

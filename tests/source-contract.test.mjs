@@ -97,6 +97,18 @@ assert.ok(watchIndex.includes('listBooks'),
   'index page must list the real library');
 assert.ok(watchIndex.includes('askDelete'),
   'index page must support delete');
+// 书架行不能同时绑定「打开」和子元素「删除」：
+// Lite >= API6 点击会冒泡，删书会顺手打开阅读页。
+const shelfHml = read('apps/watch/entry/src/main/js/MainAbility/pages/index/index.hml');
+assert.ok(!/<div class="book-row"[^>]*onclick=/.test(shelfHml),
+  'book row must not open when the child delete button is clicked');
+assert.ok(shelfHml.includes('class="book-info" onclick="openBook($idx)"'),
+  'book info must remain separately clickable');
+assert.ok(shelfHml.includes('class="book-delete" onclick="askDelete($idx)"'),
+  'delete must have its own click target');
+assert.ok(watchIndex.includes("event.type === 'RESULT'") &&
+  watchIndex.includes('this.refresh();'),
+  'watch shelf must refresh after a successful receive');
 
 // ---- Lite 运行时能力守门 ----
 // 依据（本机 HarmonyOS Command Line Tools 26.0.0 / API 26 实测）：

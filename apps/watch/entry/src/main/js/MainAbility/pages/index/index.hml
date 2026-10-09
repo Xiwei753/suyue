@@ -2,9 +2,11 @@
   <div class="panel">
     <text class="heading">{{ title }}</text>
     <div class="book-list">
-      <div class="book-row" for="{{ books }}" onclick="openBook($idx)">
-        <text class="book-title">{{ $item.title }}</text>
-        <text class="book-meta">{{ $item.encoding }} · {{ $item.bytes }} 字节</text>
+      <div class="book-row" for="{{ books }}" tid="bookId">
+        <div class="book-info" onclick="openBook($idx)">
+          <text class="book-title">{{ $item.title }}</text>
+          <text class="book-meta">{{ $item.encoding }} · {{ $item.bytes }} 字节</text>
+        </div>
         <text class="book-delete" onclick="askDelete($idx)">{{ $item.bookId === confirmId ? '确认删除' : '删除' }}</text>
       </div>
     </div>

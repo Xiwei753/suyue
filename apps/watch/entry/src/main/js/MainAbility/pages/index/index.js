@@ -28,10 +28,35 @@ export default {
     confirmId: ''
   },
   onInit() {
+    this.libraryReady = false;
     this.prepareLibrary();
     beginReceive((message) => {
-      this.transferStatus = message;
+      this.handleReceiveStatus(message);
     });
+  },
+  // 从阅读页返回书架时重新取索引，不依赖 onInit 再次执行。
+  onShow() {
+    if (this.libraryReady) this.refresh();
+  },
+  handleReceiveStatus(message) {
+    if (typeof message !== 'string') return;
+    try {
+      const event = JSON.parse(message);
+      if (event && event.type === 'RESULT') {
+        if (event.ok) {
+          this.transferStatus = '接收成功，已加入书架';
+          this.refresh();
+        } else {
+          this.transferStatus = '传书失败：' +
+            (event.reason || '未知错误');
+        }
+        return;
+      }
+      // ACK 等协议消息不覆盖界面提示。
+      return;
+    } catch (error) {
+      this.transferStatus = message;
+    }
   },
   onDestroy() {
     stopReceive();
@@ -43,6 +68,7 @@ export default {
         return;
       }
       listBooks((books) => {
+        this.libraryReady = true;
         if (books.length > 0) {
           this.books = books;
           this.status = '本地书库就绪';

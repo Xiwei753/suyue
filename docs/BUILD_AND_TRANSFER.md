@@ -113,9 +113,8 @@ GT 4 46mm 与 Pocket 2 真机、Wear Engine 文件通道回调
    `PeerIdentityConfig.g.ets` / 手表侧 `PhonePeerConfig.g.js`
    注入，空指纹明确禁用发送，不接受假值。
 2. 手机 `remoteApp` 一律使用手表身份
-   （issue #2 起为 `com.xiwei.suyue`，历史值
-   `com.xiwei753.gt4reader.watch` 已弃用），不再把手机包名
-   当对端。
+   （当前是 `com.xiwei753.gt4reader.watch`），而不是手机自己
+   的包名 `com.xiwei.suyue`；手表将来注册新 App ID 后应统一改两端身份。
 3. `BookMeta` 补 `chunks`/`chunkBytes`，导入时按
    64 KiB 消息通道分块描述填齐。
 4. 摘要与 `bookId` 对**规范化后的正文字节**计算

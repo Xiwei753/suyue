@@ -28,27 +28,39 @@
 }
 .book-row {
   width: 100%;
-  height: 58px;
+  height: 66px;
   display: flex;
   flex-direction: row;
   align-items: center;
   background-color: #20242c;
   border-radius: 12px;
   margin-bottom: 8px;
-  padding: 10px;
+  padding: 8px;
+}
+/* 316px 内容区：书籍信息 220 + 删除 64 + 左右内边距 16，
+   不再把三个横排文字栏挤出圆屏。 */
+.book-info {
+  width: 220px;
+  height: 50px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .book-title {
-  width: 190px;
+  width: 100%;
+  height: 26px;
   font-size: 18px;
   color: #f2f2f2;
 }
 .book-meta {
-  width: 120px;
+  width: 100%;
+  height: 20px;
   font-size: 12px;
   color: #9ca3af;
 }
 .book-delete {
   width: 64px;
+  height: 40px;
   font-size: 14px;
   color: #f87171;
   text-align: center;
