@@ -1,7 +1,22 @@
 name: Watch Lite HAP build (self-hosted DevEco required)
 # 源码检查（pagination-test.yml）不等于 HAP 构建。本 workflow 必须运行在
-# 已安装 Lite Wearable DevEco 工具链的自托管 runner 上；GitHub-hosted
+# 已安装 Lite Wearable 工具链的自托管 runner 上；GitHub-hosted
 # ubuntu-latest 没有 hvigor 与 Lite SDK，会直接失败。
+#
+# 【本机已实测可用的工具链（issue #2）】
+#   HarmonyOS Command Line Tools 26.0.0.821（Linux x64）
+#     /home/xiwei/.harmony-cli/bin/hvigorw
+#     $HOME/.harmony-cli/sdk/default/openharmony/js  ← Lite JS SDK
+#       （含 @system.file / @system.device / @system.router / @system.storage）
+#     $HOME/.harmony-cli/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar
+#   DEVECO_SDK_HOME=$HOME/.harmony-cli/sdk 由 hvigorw 包一层自动设置。
+#
+# 【为什么这个 job 会长期 queued】
+#   `runs-on: [self-hosted, hmos-deveco]` 需要有人真的注册这样一台
+#   runner；GitHub 托管机装不了 Lite SDK。没有 runner 时 job 只会排队，
+#   不会失败——这不是"构建通过"，也不是"构建失败"，而是"从未运行"。
+#   在 runner 注册之前，第 1 阶段的真实构建证据只能来自本机
+#   `tools/build_watch_lite.sh release` 的日志与产物体积/SHA256。
 #
 # 签名材料（secrets.WATCH_SIGNING_MATERIAL，JSON）：
 #   storeFileB64/certpathB64/profileB64: base64 编码的签名文件
@@ -17,7 +32,7 @@ name: Watch Lite HAP build (self-hosted DevEco required)
 # 确认为 64 位 hex 时设置 repo variable WATCH_FINGERPRINT_FORMAT=hex64。
 on:
   push:
-    branches: [auto-issue-1, main]
+    branches: [main, 'auto-issue-*']
     paths:
       - 'apps/watch/**'
       - 'tools/build_watch_lite.sh'
@@ -101,6 +116,7 @@ jobs:
           TOOL="$HAP_SIGN_TOOL_JAR"
           if [ -z "$TOOL" ]; then
             for candidate in \
+              "$HOME/.harmony-cli/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar" \
               "$HOME/command-line-tools/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar" \
               /opt/deveco/toolchains/lib/hap-sign-tool.jar; do
               [ -f "$candidate" ] && TOOL="$candidate" && break

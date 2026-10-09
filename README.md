@@ -2,7 +2,7 @@
 
 面向 **HUAWEI WATCH GT 4 46 mm（466 × 466 圆屏）** 的个人离线小说阅读器，以及配套的鸿蒙手机传书应用。
 
-> 当前状态：**源码原型，尚无可安装 HAP**。传书闭环的双端逻辑已完成并通过 Node 端到端互验（BOOK_META → 落盘 → SHA256 → 书架登记 → RESULT），但双端 HAP 均未产出，Wear Engine 真机互通未验证。
+> 当前状态：**手表 Lite 工程已在本机真实编译出 HAP**（含完整 JerryScript 快照，192,447 字节），但**未签名，因此还装不到 GT 4**；手机端 HAP 未产出，双端真机互通未验证。签名材料是当前第一道实际阻断。
 
 ## 两个不同的运行环境
 
@@ -29,12 +29,13 @@
 ## 开发与构建
 
 - 手表 Lite Wearable 与手机 Stage 必须分开编译、分开签名，不要混用构建工具链。
-- 手表打包：`tools/build_watch_lite.sh` + `.github/workflows/watch_lite_hap.yml`（自托管 DevEco runner；签名材料经 Secrets 注入）。**尚未实际运行，未产出 HAP**；安装与待验证清单见 [docs/WATCH_INSTALL.md](docs/WATCH_INSTALL.md)。
+- 手表打包：`tools/build_watch_lite.sh` + `.github/workflows/watch_lite_hap.yml`（自托管 DevEco runner；签名材料经 Secrets 注入）。**本机已真实编译出 HAP**（release，192,447 字节，未签名）；CI 的那个 job 因没有自托管 runner 仍只会排队，排队不是绿灯。安装与待验证清单见 [docs/WATCH_INSTALL.md](docs/WATCH_INSTALL.md)。
+- 手表端有一条必须知道的运行时限制：Lite 的 JerryScript **没有 RegExp**，正则字面量会让页面 `.bc` 快照静默生成失败（构建仍报成功、手表上却打不开）。实测范围与两道守门见 [apps/watch/README.md](apps/watch/README.md#lite-运行时限制本机实测issue-2)。
 - 手机打包：`tools/build_phone_hap.sh` + `.github/workflows/phone_hap.yml`（自托管 DevEco runner；签名材料经 Secrets 注入）。**尚未实际运行，未产出 HAP**。
 - 首先验证 GT 4 46mm 支持哪组 Lite SDK/IDE + 签名 + DevEco Assistant 安装流程，才配置真正能产生 signed HAP 的 CI。
 - 手机端可借鉴已有鸿蒙 NEXT CLI 构建流程，**但需要独立应用证书和本项目构建配置**；素笺的打包脚本不能原封不动使用。
 - 详细状态、环境差异和验收清单见 [开发与安装路线](docs/BUILD_AND_TRANSFER.md)。
-- 当前仅有源码检查与分页/ZIP 测试，尚未进行两端 DevEco 编译或设备验证。
+- 当前已完成手表端的真实 DevEco 编译；手机端与两端设备验证仍未进行。
 
 ## 项目目录
 

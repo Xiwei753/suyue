@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 静态结构检查，不调用 SDK、不能取代两端 HAP 编译。
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 
 const read = (path) => readFileSync(path, 'utf8');
 const watchConfig = JSON.parse(read('apps/watch/entry/src/main/config.json'));
@@ -84,16 +85,124 @@ assert.ok(watchReader.includes('router.getParams'),
   'reader must read bookId from router params');
 assert.ok(watchReader.includes('normalizeSettings'),
   'reader must use ReaderSettings as single truth');
-assert.ok(watchReader.includes('crownSupported'),
-  'reader must gate crown input behind capability check');
+assert.ok(watchReader.includes('createCrownTracker'),
+  'reader must route crown rotation through CrownInput tracker');
+assert.ok(watchReader.includes('crownProxy'),
+  'reader must own the hidden slider ref used as crown proxy');
 const crownInput = read('apps/watch/entry/src/main/js/MainAbility/reader/CrownInput.js');
-assert.ok(crownInput.includes('return false'),
-  'crown input must not claim support without SDK verification');
+assert.ok(crownInput.includes("'unverified'"),
+  'crown input must not claim verified support without a device run');
 const watchIndex = read('apps/watch/entry/src/main/js/MainAbility/pages/index/index.js');
 assert.ok(watchIndex.includes('listBooks'),
   'index page must list the real library');
 assert.ok(watchIndex.includes('askDelete'),
   'index page must support delete');
+
+// ---- Lite 运行时能力守门 ----
+// 依据（本机 HarmonyOS Command Line Tools 26.0.0 / API 26 实测）：
+// ace-loader 用 jerry-snapshot 把每个页面 JS 转成 .bc；该 JerryScript
+// 构建**没有 RegExp**——正则字面量在解析期报 SyntaxError，快照生成
+// 失败；而 lite-snapshot-plugin 只打印一行错误、**不会让构建失败**，
+// 于是 HAP 里缺少该页 .bc，构建显示 BUILD SUCCESSFUL，页面在手表上
+// 却起不来。曾在 reader.js/TransferLogic.js/BookStorage.js 命中此坑。
+// 这里扫描手表源码，禁止再次引入正则与实测缺失的 API。
+const WATCH_JS_ROOT = 'apps/watch/entry/src/main/js/MainAbility';
+const watchJsFiles = [];
+(function walk(dir) {
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) walk(full);
+    else if (name.endsWith('.js')) watchJsFiles.push(full);
+  }
+})(WATCH_JS_ROOT);
+
+// 把注释与字符串内容抹成空格（保留换行以便报行号），
+// 两道检查都基于这份代码骨架——注释里提到 RegExp 不算违规。
+function stripToCode(src) {
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    const n = src[i + 1];
+    if (c === '/' && n === '/') {
+      while (i < src.length && src[i] !== '\n') i++;
+      continue;
+    }
+    if (c === '/' && n === '*') {
+      i += 2;
+      while (i < src.length &&
+             !(src[i] === '*' && src[i + 1] === '/')) {
+        out += src[i] === '\n' ? '\n' : ' ';
+        i++;
+      }
+      i += 2;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') {
+      out += c;
+      i++;
+      while (i < src.length && src[i] !== c) {
+        if (src[i] === '\\') { i += 2; continue; }
+        out += src[i] === '\n' ? '\n' : ' ';
+        i++;
+      }
+      out += c;
+      i++;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
+// 判断 `/` 是否落在正则位置：它前面最近的有意义字符
+// 只能是表达式起始符，否则是除号。
+function findRegexLiterals(code) {
+  const regexPrefix = '(,=:[!&|?{};+-*%~^<>';
+  const hits = [];
+  let prev = '';
+  let line = 1;
+  let i = 0;
+  while (i < code.length) {
+    const c = code[i];
+    if (c === '\n') { line++; i++; continue; }
+    if (c === '/') {
+      if (prev === '' || regexPrefix.indexOf(prev) !== -1) {
+        hits.push(line);
+      }
+      prev = '/';
+      i++;
+      continue;
+    }
+    if (c !== ' ' && c !== '\t' && c !== '\r') prev = c;
+    i++;
+  }
+  return hits;
+}
+
+// 实测不可用的 API（Node/ArkTS 有、Lite 的 JerryScript 没有）。
+const MISSING_APIS = [
+  ['new RegExp', 'RegExp 构造函数在 Lite 运行时不存在'],
+  ['padStart', 'String.prototype.padStart 缺失'],
+  ['padEnd', 'String.prototype.padEnd 缺失'],
+  ['DataView', 'DataView 缺失'],
+  ['replace(', 'String.replace 仍依赖正则实现，Lite 下抛 TypeError'],
+  ['match(', 'String.match 依赖正则，Lite 下不可用'],
+  ['search(', 'String.search 依赖正则，Lite 下不可用']
+];
+
+for (const file of watchJsFiles) {
+  const code = stripToCode(read(file));
+  const lines = findRegexLiterals(code);
+  assert.equal(lines.length, 0,
+    `${file} 含正则字面量（第 ${lines.join(', ')} 行）：` +
+    'Lite 的 JerryScript 没有 RegExp，会导致页面 .bc 快照生成失败，' +
+    '构建仍报成功但手表上打不开该页。请改用字符比较（见 util/Validate.js）。');
+  for (const [api, why] of MISSING_APIS) {
+    assert.ok(!code.includes(api), `${file} 使用了不可用 API「${api}」：${why}`);
+  }
+}
 
 // ---- 施工单复核（issue #1 第二轮）静态检查 ----
 // P0-1/P0-2：双端身份分离，手机不得把
@@ -277,10 +386,13 @@ assert.ok(!watchIndex.includes('fail: () => this.registerDemo()'),
 assert.ok(!watchIndex.includes('bytes: 0'),
   'migration must not fabricate metadata');
 
-// P2-15：表冠保持诚实的不支持声明。
-// （crownInput 已在上方检查过 return false。）
-assert.ok(crownInput.includes('return false'),
-  'crown must stay unsupported until SDK-verified');
+// P2-15（issue #2 更新）：表冠不再是"永远返回 false"的占位。
+// 已按上游 slider/rotation 机制接入（见上方 crownProxy 检查），
+// 但仍不得宣称已验证：状态必须是 'unverified'，真机结论只写文档。
+assert.ok(crownInput.includes("'unverified'"),
+  'crown must stay unverified until a GT4 device run proves it');
+assert.ok(!crownInput.includes("return 'supported'"),
+  'crown must not claim supported status without a device run');
 
 // TransferLogic 源码（静态检查用）。
 function transferLogicSrc() {

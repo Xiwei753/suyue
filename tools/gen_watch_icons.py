@@ -20,6 +20,6 @@ def make(size, path):
                         radius=w // 2, fill=(242, 242, 242, 255))
     img.save(path, "PNG")
 
-make(1024, "apps/watch/entry/src/main/resources/base/media/icon.png")
-make(216, "apps/watch/entry/src/main/resources/base/media/icon_small.png")
+make(104, "apps/watch/entry/src/main/resources/base/media/icon.png")
+make(92, "apps/watch/entry/src/main/resources/base/media/icon_small.png")
 print("icons written")

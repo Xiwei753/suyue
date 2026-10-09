@@ -335,7 +335,12 @@ export class BookTransferService {
           transferId: transferId,
           bookId: book.bookId,
           title: book.title,
-          encoding: book.encoding,
+          // 固定 'utf-8'：BookMeta 没有 encoding 字段，也不能有——
+          // 导入链路（BookImportService.importBook）已把 TXT 解码后
+          // 重新编码、EPUB 转出的正文也用 packChapters 打包，落到
+          // 沙箱的字节一律是 UTF-8。协议（shared/protocol）同样只
+          // 接受 'utf-8'，所以这里发的是既成事实，不是占位值。
+          encoding: 'utf-8',
           bytes: book.bytes,
           sha256: book.sha256,
           chunks: book.chunks,

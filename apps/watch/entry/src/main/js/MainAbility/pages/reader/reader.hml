@@ -1,4 +1,10 @@
 <div class="screen" style="background-color: {{ theme === 'day' ? '#f5f4f0' : '#101114' }};">
+  <!-- 表冠代理：1×1 透明 slider，靠 rotation({focus}) 抢占表冠焦点，
+       旋转经 onchange 回调。做法来自上游 MIT 示例
+       sportwatch-how-to-use-crown，说明见 reader/CrownInput.js。
+       GT4 真机是否送达旋转事件尚未验证，触屏翻页保持可用。 -->
+  <slider class="proxy-slider" ref="crownProxy"
+          min="0" max="6" onchange="onCrownChange"></slider>
   <div class="reading-area">
     <text class="book-title" style="color: {{ theme === 'day' ? '#5b6470' : '#9da3af' }};" onclick="backToLibrary">{{ title }}</text>
     <text class="book-text" style="font-size: {{ fontSize }}px; line-height: {{ fontSize * lineHeightRatio }}px; color: {{ theme === 'day' ? '#1c1e22' : '#f3f3f3' }};">{{ body }}</text>

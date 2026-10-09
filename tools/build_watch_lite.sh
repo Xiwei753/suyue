@@ -35,7 +35,16 @@ mkdir -p "$OUT_DIR"
 
 # 按请求的 buildMode 挑选：release
 # 构建不得验到 debug 产物。
+# 未配置 signingConfigs 时 hvigor 只产出
+# entry-default-unsigned.hap（名字里没有 buildMode 段，本机实测），
+# 这与"根本没有产物"是两件事：前者要明确报"未签名、不可安装"，
+# 后者才是构建失败。
 HAP="$(find "$OUT_DIR" -name "entry-default-$MODE-*.hap" -type f 2>/dev/null | head -n 1)"
+UNSIGNED=0
+if [ -z "$HAP" ]; then
+  HAP="$(find "$OUT_DIR" -name 'entry-default-unsigned.hap' -type f 2>/dev/null | head -n 1)"
+  UNSIGNED=1
+fi
 if [ -z "$HAP" ]; then
   echo "ERROR: hvigor reported success but no $MODE HAP was produced under" >&2
   echo "       $OUT_DIR/" >&2
@@ -48,3 +57,18 @@ echo "HAP_PATH=$REPO_ROOT/apps/watch/$HAP"
   --bundle 'com.xiwei753.gt4reader.watch' \
   --device liteWearable \
   --mode "$MODE"
+
+if [ "$UNSIGNED" = "1" ]; then
+  cat >&2 <<'MSG'
+
+========================================================================
+注意：本次产物是 **未签名 HAP**，不可安装到 GT 4。
+build-profile.json5 里 signingConfigs 为空，hvigor 跳过了签名
+（日志中的 "Will skip sign 'hos_hap'"）。要让阶段验收成立，需要
+素阅自己的华为签名材料（.p12 / .cer / .profile），经
+tools/inject_signing.py 注入；素笺的证书不能复用（包名与 profile
+不匹配，议题 #2 也明确要求本项目独立证书）。
+因此：本轮构建成功 ≠ 第 1 阶段验收通过。
+========================================================================
+MSG
+fi

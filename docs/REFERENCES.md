@@ -6,9 +6,10 @@
 
 1. [Explore-In-HMOS-Wearable/sportwatch-how-to-read-large-text-files](https://github.com/Explore-In-HMOS-Wearable/sportwatch-how-to-read-large-text-files)：参考 `FileService.js` 的 `@system.file` 分块读取；改造成 `storage/BookStorage.js` 的 UTF-8 字节窗口和 `storage/ProgressStore.js` 的进度保存（原 `BookFiles.js` 生成器已在第二轮评审后移除）。
 2. [Explore-In-HMOS-Wearable/sportwatch-how-to-do-file-operations](https://github.com/Explore-In-HMOS-Wearable/sportwatch-how-to-do-file-operations)：参考 Lite Wearable 文件创建、读写、文件存在性检查、读取缓冲区的调用方式。
-3. [Explore-In-HMOS-Wearable/sportwatch-wear-engine-lite-wearable-to-mobile](https://github.com/Explore-In-HMOS-Wearable/sportwatch-wear-engine-lite-wearable-to-mobile)：参考 Wear Engine 的手机包名、签名指纹与消息接收流程；因手机端未接好且真实签名尚未生成，接收默认禁用。
+3. [Explore-In-HMOS-Wearable/sportwatch-how-to-use-crown](https://github.com/Explore-In-HMOS-Wearable/sportwatch-how-to-use-crown)：参考 `pages/index/index.hml` 的 1×1 透明 `<slider ref="crownProxy">` 与 `index.js` 的 `this.$refs.crownProxy.rotation({focus:true})` + `onchange`，改造成 `reader/CrownInput.js` 的表冠翻页换算器。**GT4 真机是否送达旋转事件尚未验证**，故 `crownStatus()` 返回 `'unverified'`，触屏翻页保留。
+4. [Explore-In-HMOS-Wearable/sportwatch-wear-engine-lite-wearable-to-mobile](https://github.com/Explore-In-HMOS-Wearable/sportwatch-wear-engine-lite-wearable-to-mobile)：参考 Wear Engine 的手机包名、签名指纹与消息接收流程；因手机端未接好且真实签名尚未生成，接收默认禁用。
 
-以上三项作者版权均为 Copyright (c) 2025 Explore in HMOS Wearable，MIT 授权；来源快照与完整 MIT 条款见 [third_party/NOTICE.md](../third_party/NOTICE.md)。**不能把示例中附带的华为 Apache-2.0 SDK 包装代码视作 MIT 代码**；本项目未复制它。
+以上四项作者版权均为 Copyright (c) 2025 Explore in HMOS Wearable，MIT 授权；来源快照与完整 MIT 条款见 [third_party/NOTICE.md](../third_party/NOTICE.md)。**不能把示例中附带的华为 Apache-2.0 SDK 包装代码视作 MIT 代码**；本项目未复制它。
 
 ## 仅作体验参考
 

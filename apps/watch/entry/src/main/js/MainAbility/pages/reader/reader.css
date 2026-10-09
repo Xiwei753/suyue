@@ -7,6 +7,13 @@
   align-items: center;
   justify-content: center;
 }
+/* 表冠代理 slider：占位 1×1 且完全透明，
+   只为接收 rotation 事件，不参与排版。 */
+.proxy-slider {
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
 .reading-area {
   width: 316px;
   height: 400px;

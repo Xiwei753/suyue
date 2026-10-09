@@ -13,7 +13,9 @@ import { loadProgress,
 import { takePage } from '../../reader/PageLayout';
 import { normalizeSettings, columnsFor,
   rowsFor } from '../../reader/ReaderSettings';
-import { crownSupported } from '../../reader/CrownInput';
+import { createCrownTracker,
+  crownStatus } from '../../reader/CrownInput';
+import { isLowerHex } from '../../util/Validate';
 
 export default {
   data: {
@@ -25,7 +27,10 @@ export default {
     fontSize: 20,
     lineHeightRatio: 1.55,
     theme: 'night',
-    crown: false,
+    // 表冠：隐藏 slider 是否真的挂载（设备运行时可见），
+    // 与"旋转事件是否送达"是两件事，后者待真机验证。
+    crownMounted: false,
+    crownStatus: 'unverified',
     isBusy: true,
     // 设置收进二级交互（P2-13）：主操作
     // 只保留上页/下页，避免控件互相挤占。
@@ -35,11 +40,12 @@ export default {
     this.history = [];
     this.bookId = '';
     this.settings = normalizeSettings(null);
-    this.crown = crownSupported();
+    this.crownStatus = crownStatus();
+    this.crownTracker = createCrownTracker(null);
     const params = router.getParams() || {};
     const bookId = params.bookId;
     if (typeof bookId !== 'string' ||
-        !/^[0-9a-f]{16}$/.test(bookId)) {
+        !isLowerHex(bookId, 16)) {
       this.pageHint = '未知书籍，请返回书架选择';
       this.isBusy = false;
       return;
@@ -101,7 +107,7 @@ export default {
       this.offset = page.offset;
       this.nextOffset = page.nextOffset;
       this.pageHint = '字节位置 ' + this.offset +
-        (this.crown ? ' · 表冠翻页' : '');
+        (this.crownMounted ? ' · 表冠待真机验证' : '');
       // 进度写完才允许继续翻页，避免多个异步写覆盖更晚的进度。
       saveProgress(this.bookId, this.offset, this.history,
         this.currentSettings(), (state) => {
@@ -135,6 +141,36 @@ export default {
   // 展开/收起设置行（字号、主题）。
   toggleSettings() {
     this.settingsOpen = !this.settingsOpen;
+  },
+  // ---- 表冠（机制来自上游 MIT 示例，见 reader/CrownInput.js）----
+  // 隐藏 slider 挂载后抢占表冠焦点；设备上若 $refs.crownProxy
+  // 不存在则静默跳过，触屏「上页/下页」照常可用。
+  onShow() {
+    this.focusCrown(true);
+  },
+  onHide() {
+    this.focusCrown(false);
+  },
+  onDestroy() {
+    this.focusCrown(false);
+  },
+  focusCrown(focus) {
+    const proxy = this.$refs && this.$refs.crownProxy;
+    if (!proxy || typeof proxy.rotation !== 'function') {
+      this.crownMounted = false;
+      return;
+    }
+    this.crownMounted = true;
+    proxy.rotation({ focus: focus });
+  },
+  // 旋转回调：是否翻页由 CrownInput 的换算器决定；
+  // 每个回调最多翻一页（翻页本身是异步读+写进度）。
+  // GT4 真机是否送达此回调、每页阈值多少，均待实测。
+  onCrownChange(e) {
+    if (!e) return;
+    const pages = this.crownTracker.push(e.value);
+    if (pages > 0) this.nextPage();
+    else if (pages < 0) this.previousPage();
   },
   backToLibrary() {
     router.back();

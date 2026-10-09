@@ -6,6 +6,7 @@
 //   internal://app/gt4reader/progress/<bookId>.json
 //   internal://app/gt4reader/books.json           书库索引
 import file from '@system.file';
+import { isLowerHex, isSafeToken } from '../util/Validate.js';
 
 export var ROOT = 'internal://app/gt4reader';
 export var BOOKS_DIR = ROOT + '/books';
@@ -15,9 +16,9 @@ export var INDEX_FILE = ROOT + '/books.json';
 
 // bookId 只允许小写十六进制（内容 SHA-256 前 16 字符），
 // 直接映射为文件名，杜绝路径穿越。
+// 不用正则：Lite 的 JerryScript 没有 RegExp（见 util/Validate.js）。
 export function isSafeBookId(bookId) {
-  return typeof bookId === 'string' &&
-    /^[0-9a-f]{16}$/.test(bookId);
+  return isLowerHex(bookId, 16);
 }
 
 export function bookPath(bookId) {
@@ -28,9 +29,7 @@ export function bookPath(bookId) {
 }
 
 export function tempPath(transferId) {
-  if (typeof transferId !== 'string' ||
-      transferId.length < 1 || transferId.length > 128 ||
-      /[^0-9a-zA-Z\-_]/.test(transferId)) {
+  if (!isSafeToken(transferId, 128)) {
     throw new Error('unsafe transferId');
   }
   return TEMP_DIR + '/' + transferId;

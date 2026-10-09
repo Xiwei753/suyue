@@ -2,8 +2,7 @@
 // 传输协议纯逻辑（无 HarmonyOS 依赖，Node 可测）：
 // BOOK_META 校验、块接收（幂等、按序）、拼接、摘要核验。
 import { sha256Bytes, createSha256 } from '../util/Sha256.js';
-
-var HEX_RE = /^[0-9a-f]{64}$/;
+import { isLowerHex } from '../util/Validate.js';
 
 export function validateBookMeta(meta) {
   if (!meta || typeof meta !== 'object') {
@@ -15,7 +14,7 @@ export function validateBookMeta(meta) {
     return { ok: false, reason: 'E_PROTOCOL' };
   }
   if (typeof meta.bookId !== 'string' ||
-      !/^[0-9a-f]{16}$/.test(meta.bookId)) {
+      !isLowerHex(meta.bookId, 16)) {
     return { ok: false, reason: 'E_PROTOCOL' };
   }
   if (typeof meta.title !== 'string') {
@@ -28,7 +27,7 @@ export function validateBookMeta(meta) {
     return { ok: false, reason: 'E_PROTOCOL' };
   }
   if (typeof meta.sha256 !== 'string' ||
-      !HEX_RE.test(meta.sha256)) {
+      !isLowerHex(meta.sha256, 64)) {
     return { ok: false, reason: 'E_PROTOCOL' };
   }
   if (typeof meta.chunks !== 'number' || meta.chunks < 1) {
