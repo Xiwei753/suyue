@@ -124,7 +124,7 @@ if [ -n "$SIGN_P12" ] || [ -n "$SIGN_CER" ] || [ -n "$SIGN_PROFILE" ]; then
 
   # 包名预检：profile 授权的包名必须等于本 HAP 的包名。
   # 本机实测过这个坑：拿**手机**的 profile（com.xiwei.suyue）去签
-  # **手表** HAP（com.xiwei753.gt4reader.watch），hap-sign-tool 照样
+  # **手表** HAP（com.xiwei.suyue.gt4），hap-sign-tool 照样
   # 报 "Sign Hap success!"——证书链有效，但设备按包名校验会拒绝安装。
   # 所以签名前先比对，不匹配就**不签**，退回未签名并说明原因。
   SIGN_MISMATCH=""
@@ -215,7 +215,7 @@ fi
 
 "$REPO_ROOT/tests/build_artifact_check.sh" \
   "$REPO_ROOT/apps/watch/$HAP" \
-  --bundle 'com.xiwei753.gt4reader.watch' \
+  --bundle 'com.xiwei.suyue.gt4' \
   --device liteWearable \
   --mode "$MODE"
 

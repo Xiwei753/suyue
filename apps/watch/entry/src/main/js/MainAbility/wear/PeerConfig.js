@@ -19,4 +19,4 @@ export const PHONE_BUNDLE_NAME =
 export const PHONE_CERT_FINGERPRINT =
   INJECTED_PHONE_FINGERPRINT;
 export const WATCH_BUNDLE_NAME =
-  'com.xiwei753.gt4reader.watch';
+  'com.xiwei.suyue.gt4';

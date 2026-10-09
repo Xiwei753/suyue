@@ -49,9 +49,9 @@ profile 绑定包名，**它授权的是 `com.xiwei.suyue`**。
   （`AppScope/app.json5`、`PeerIdentity.ets` 的 `PHONE_SELF`、
   手表侧作为对端的 `PeerConfig.PHONE_BUNDLE_NAME` 与 `config.json`
   的 `supportLists`）。
-- **手表包名暂未定**，仍保留历史值 `com.xiwei753.gt4reader.watch`，
-  等确认后再改。手表与手机的包名由
-  `tests/source-contract.test.mjs` 断言「两处一致且互不相同」。
+- **手表包名现定为** `com.xiwei.suyue.gt4`，原 `com.xiwei753.gt4reader.watch` 是旧版。
+  AGC 应以新包名创建 GT4 应用并签发匹配的调试 Profile（包含 GT4 UDID）。
+  `tests/source-contract.test.mjs` 检查手机和手表两端包名、自述、对端身份、构建检查一致且互不相同。
 - **本目录的 profile 不能用来签手表 HAP**。`tools/build_watch_lite.sh`
   已加包名预检：profile 授权的包名与 HAP 不一致时**拒绝签名**并退回
   未签名产物。这个坑很隐蔽——拿手机的 profile 签手表 HAP，

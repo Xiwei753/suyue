@@ -1,7 +1,8 @@
 # GT 4 46mm 安装与构建说明（已编译，未签名，未实机安装）
 
 > 状态（issue #2 更新）：**手表 Lite 工程已在本机真实编译成功**，产出
-> `entry-default-unsigned.hap`（192,409 字节，含完整页面快照）。
+> **旧包名构建**的 `entry-default-unsigned.hap`（192,409 字节，含完整页面快照）。
+> 当前源码包名已更新为 `com.xiwei.suyue.gt4`，尚无新包名版本的构建与安装记录。
 > **但产物未签名**：`signing/` 里现有的证书/profile 属于**手机**
 > （Profile 包名 `com.xiwei.suyue`），与手表 HAP 包名不一致，签名脚本按包名
 > 预检**拒绝签名**并退回未签名产物。手表专属的 Profile 尚未签发。
@@ -43,7 +44,7 @@ tools/build_watch_lite.sh release    # 或 debug
 脚本要求 `hvigorw` 存在于 PATH；缺失时明确报错退出，不会把 Node
 静态检查伪装成构建成功。构建成功后输出 HAP 路径、大小与 SHA-256。
 
-**本机实测结果（`tools/build_watch_lite.sh release`）**：
+**改包名前的历史实测结果（`tools/build_watch_lite.sh release`，仅作旧包名构建记录）**：
 
 ```text
 拒绝签名：签名 profile 授权的包名与本 HAP 不一致。
@@ -108,16 +109,14 @@ HAP_OK path=.../entry-default-unsigned.hap manifest=config.json
 - `targetSdkVersion` / `compatibleSdkVersion` 的 `6.1.1(24)` 来自轻智能手表示例模板，
   **尚未确认为 GT 4 开发安装实际可用的版本**；需在真实 DevEco 环境中核对。
 - Wear Engine 接收依赖手机端证书指纹，尚未配置（见 `wear/PeerConfig.js`）。
-- **手表签名材料尚未签发**：现有 profile 是手机的，不能顶替。没有它
+- **手表专属调试 Profile 尚未签发**：现有 Profile 是手机的，不能顶替。没有它
   就产不出可安装的手表 HAP，因此第 1 阶段"可安装"验收**尚未达成**，
   不能关闭议题 #2。
 - **真机安装尚未做**：签名通过也只证明 HAP 完整、证书链有效。设备端还会
   校验 profile 的包名、`debug-info.device-ids`（需要手表的 UDID）、
   有效期与设备调试状态。这几项都没在 GT 4 上验证过。
-- **CI 的签名路径尚未同步**：`watch_lite_hap.yml` 仍按
-  `tools/inject_signing.py` 写 hvigor `signingConfigs` 的方式签名，
-  而那条路在本机实测失败（`SignHap` → `00308018`）。要让它能产出
-  签名 HAP，需改成与本地脚本一致的"未签名构建 + `hap-sign-tool
-  sign-app` + `verify-app`"。
+- **CI 的签名代码已同步**：`watch_lite_hap.yml` 已改为 unsigned HAP →
+  `hap-sign-tool sign-app` → `verify-app`，但自托管 Runner 仍排队，尚无新包名构建证据。
 - 手机包名已改为 `com.xiwei.suyue`（对应现有 AGC 应用与证书），
-  但**手机 HAP 仍未构建**；手表包名待确认。
+  但**手机 HAP 仍未构建**；手表包名已改为 `com.xiwei.suyue.gt4`，
+  需要在 AGC 注册相同包名并签发包含 GT4 UDID 的独立调试 Profile。

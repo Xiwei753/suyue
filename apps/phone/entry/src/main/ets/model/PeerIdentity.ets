@@ -24,7 +24,7 @@ export const PHONE_SELF: PeerIdentity = {
 };
 
 export const WATCH_PEER: PeerIdentity = {
-  bundleName: 'com.xiwei753.gt4reader.watch',
+  bundleName: 'com.xiwei.suyue.gt4',
   fingerprint: ''
 };
 

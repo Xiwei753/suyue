@@ -232,8 +232,8 @@ assert.ok(peerIdentity.includes('PHONE_SELF'),
 assert.ok(peerIdentity.includes('WATCH_PEER'),
   'PeerIdentity must define WATCH_PEER');
 // issue #2：手机包名对齐 AGC 证书里的 com.xiwei.suyue；
-// 手表包名暂留历史值，等确认后另行改动。
-const WATCH_BUNDLE = 'com.xiwei753.gt4reader.watch';
+// 手表包名已确认：com.xiwei.suyue.gt4。
+const WATCH_BUNDLE = 'com.xiwei.suyue.gt4';
 const PHONE_BUNDLE = 'com.xiwei.suyue';
 assert.ok(
   peerIdentity.includes("'" + PHONE_BUNDLE + "'") &&
@@ -248,6 +248,14 @@ assert.ok(
 // 两个包名不能撞在一起：手机与手表是各自独立的 HAP。
 assert.notEqual(PHONE_BUNDLE, WATCH_BUNDLE,
   'phone and watch bundle names must differ');
+assert.equal(phoneAppJson.app.bundleName, PHONE_BUNDLE,
+  'phone AppScope bundle must match PHONE_SELF');
+const watchBuildScript = read('tools/build_watch_lite.sh');
+assert.ok(watchBuildScript.includes("--bundle '" + WATCH_BUNDLE + "'"),
+  'watch build script must verify the configured GT4 bundle');
+const watchWorkflow = read('.github/workflows/watch_lite_hap.yml');
+assert.ok(watchWorkflow.includes('--bundle ' + WATCH_BUNDLE),
+  'watch workflow must verify the configured GT4 bundle');
 assert.ok(!phoneIndexFull.includes('phoneFingerprint'),
   'phone index must not carry a loose phoneFingerprint');
 assert.ok(phoneIndexFull.includes('WATCH_PEER'),

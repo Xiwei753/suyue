@@ -2,7 +2,7 @@
 
 面向 **HUAWEI WATCH GT 4 46 mm（466 × 466 圆屏）** 的个人离线小说阅读器，以及配套的鸿蒙手机传书应用。
 
-> 当前状态：**手表 Lite 工程已在本机真实编译出 HAP**（192 KB，含完整页面快照），但**未签名**——现有签名材料属于手机（`com.xiwei.suyue`），手表自己的证书/profile 尚未签发；也**没在 GT 4 上安装验证**。手机端 HAP 未产出，双端真机互通未验证。
+> 当前状态：**旧包名版本**的手表 Lite 工程曾在本机编译出未签名 HAP（192 KB，含完整页面快照）。本轮已将手表包名统一为 `com.xiwei.suyue.gt4`，**新包名版本尚未产生真实签名 HAP，也未在 GT4 安装**。已有 `com.xiwei.suyue` Profile 仅属于手机，新手表包名需要独立调试 Profile；手机端 HAP 和双端互通均未验证。
 
 ## 两个不同的运行环境
 
@@ -52,7 +52,7 @@ tests/            与系统 SDK 无关的静态检查/分页测试
 
 产品名称为「素阅」，仓库名为 `suyue`。
 
-- 手表 HAP **包名暂定为历史值** `com.xiwei753.gt4reader.watch`，**待确认后再改**。
+- 手表 HAP 包名已经确定为 **`com.xiwei.suyue.gt4`**（原 `com.xiwei753.gt4reader.watch` 仅作为旧版历史记录）。必须在 AGC 以这个新包名创建手表应用并申请独立调试 Profile。
 - 手机 HAP 包名已按 AGC 证书对齐为 **`com.xiwei.suyue`**（证书里写定的名字），
   同步改了 `AppScope/app.json5`、手机端 `PeerIdentity.ets` 的 `PHONE_SELF`、
   手表侧作为对端的 `PeerConfig.PHONE_BUNDLE_NAME` 与 `config.json` 的

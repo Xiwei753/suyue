@@ -61,16 +61,16 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
 - 工程结构已对齐 Lite Wearable 参考示例（`build-profile.json5` 含 `signingConfig`/`strictMode`、`hvigor/hvigor-config.json5`、`entry/hvigorfile.ts`、`resources/base/media/icon{,_small}.png`、`config.json` 的 `"$media:icon"`）。
 - 本地构建：`tools/build_watch_lite.sh debug|release`；需要 DevEco `hvigorw` 与 Lite Wearable SDK，缺失时明确报错，不用 Node 检查冒充构建。
 - **本机已真实编译成功；签名目前被拒绝，产物是未签名的**（release）：
-  `entry-default-unsigned.hap`，192,409 字节。原因不是缺材料，而是
+  **旧包名构建**的 `entry-default-unsigned.hap`，192,409 字节。原因不是缺材料，而是
   `signing/` 里现有的 Profile 授权**手机**（包名 `com.xiwei.suyue`），
-  与手表 HAP 的包名不一致，脚本按包名预检**拒绝签名**并退回未签名产物。
+  与当时手表 HAP 的包名不一致，脚本按包名预检**拒绝签名**并退回未签名产物；
+  上述数值并非新包名版本的构建或安装结果。
   这个坑很隐蔽：拿手机 profile 签手表 HAP，`hap-sign-tool` 照样报
   `Sign Hap success!`，但设备按包名校验会拒绝安装——"签名成功"没有意义。
   **手表包名专属的 Profile 尚未签发**；有效且用途匹配的 `.p12` / `.cer` 可复用。
   包内快照齐全：`app.bc` (806 B)、`pages/index/index.bc` (29,938 B)、
   `pages/reader/reader.bc` (21,802 B)。
-- **包名**：手表仍是历史值 `com.xiwei753.gt4reader.watch`，**待确认后另改**；
-  手机已按 AGC 证书对齐为 `com.xiwei.suyue`。
+- **包名**：手表现为 `com.xiwei.suyue.gt4`，历史旧名 `com.xiwei753.gt4reader.watch` 不再用于构建；手机仍为 `com.xiwei.suyue`。手表须另办与新包名及 GT4 UDID 匹配的调试 Profile。
 - 签名走的是**未签名构建 + `hap-sign-tool sign-app` + `verify-app`**：
   hvigor 的 `signingConfigs` 在这个 legacy Lite 工程上实测失败
   （`SignHap` → `00308018 ENOENT: stat '<dir>/material'`），
