@@ -113,7 +113,7 @@ GT 4 46mm 与 Pocket 2 真机、Wear Engine 文件通道回调
    `PeerIdentityConfig.g.ets` / 手表侧 `PhonePeerConfig.g.js`
    注入，空指纹明确禁用发送，不接受假值。
 2. 手机 `remoteApp` 一律使用手表身份
-   （现为 `com.xiwei.suyue.gt4`），而不是手机自己的包名
+   （现为 `con.xiwei.suyue.gt4`），而不是手机自己的包名
    `com.xiwei.suyue`。手表 Manifest、AGC App ID、手表 Profile 和手机的 WATCH_PEER 必须保持一致。
 3. `BookMeta` 补 `chunks`/`chunkBytes`，导入时按
    64 KiB 消息通道分块描述填齐。
@@ -171,7 +171,10 @@ Secrets、GT 4 46mm 与 Pocket 2 真机、Wear Engine
 
 - `apps/watch/build-profile.json5` 暂时采用轻智能手表示例的 `6.1.1(24)` 模板数值，但**没有确认为 GT 4 开发安装实际可用的版本**。
 - HML 页面的几何大小和字号尚未经真机校准；UTF-8 分页是估算字宽，不是字体像素测量。
-- `wear/WearReceiver.js` 的手机指纹经 CI 注入（`PhonePeerConfig.g.js`），未注入时停用消息接收；**系统级授权还需要 `config.json` 的 `supportLists` 同步注入**（workflow 已做，构建后从 HAP 内清单复验）。`wearengine.sendMsg` 的参数形状以华为 Lite 示例为准，**待真机验证**。
+- `wear/WearReceiver.js` 的手机指纹经 CI 注入（`PhonePeerConfig.g.js`），未注入时停用消息接收；**系统级授权还需要 `config.json` 的 `supportLists` 同步注入**（workflow 已做，构建后从 HAP 内清单复验）。`wearengine.sendMsg` 的参数形状以华为 Lite 示例为准，**待真机验证**：其中
+`deviceId` 的占位回退值 `'remote'` 已确认未经真机验证，实现会优先采用从
+订阅回调里探测到的真实 `deviceId`，探测不到时回退并告警一次，
+不静默把占位值当真值用。
 - 手表文件通道依赖 Wear Engine 回调给出的文件路径字段：实现按 `file`/`name`/`uri`/`filePath` 逐字段探测并记录来源，**字段名待真机核对**。
 - 手表单本在途互斥（`E_BUSY`）：并发传书会被拒绝，手机侧同样限制并发发送。
 - 证书指纹格式（hex / 编码字符串）以 GT4 Lite SDK 实测为准；当前注入脚本默认宽松校验，可用 `--fingerprint-format hex64` 收紧。

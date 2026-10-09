@@ -67,7 +67,14 @@ echo "HAP_PATH=$REPO_ROOT/apps/watch/$HAP"
 #   1. 环境变量 WATCH_SIGN_P12 / WATCH_SIGN_CER / WATCH_SIGN_PROFILE
 #      + WATCH_SIGN_KEY_ALIAS / WATCH_SIGN_KEY_PASSWORD /
 #        WATCH_SIGN_STORE_PASSWORD（CI 用，来自 Secrets）
-#   2. $REPO_ROOT/signing/（本地，内容已被 .gitignore 挡住）
+#   2. $SIGNING_DIR（默认 $REPO_ROOT/signing/，内容已被 .gitignore 挡住）
+#
+# 本地目录按用途分开，**不能只是"取第一个匹配文件"**：手机和手表在华为侧
+# 是两个独立应用（com.xiwei.suyue / con.xiwei.suyue.gt4），各自的 profile
+# 放在同一层会互相顶替。所以：
+#   shared/  两端共用：私钥、账号级调试证书链、口令
+#   watch/   手表自己的 profile
+#   phone/   手机自己的 profile
 # 两者都缺就保持未签名，并明确报"不可安装"，绝不假装签名成功。
 SIGNING_DIR="${WATCH_SIGNING_DIR:-$REPO_ROOT/signing}"
 SIGN_P12="${WATCH_SIGN_P12:-}"
@@ -77,20 +84,40 @@ SIGN_ALIAS="${WATCH_SIGN_KEY_ALIAS:-}"
 SIGN_KEY_PWD="${WATCH_SIGN_KEY_PASSWORD:-}"
 SIGN_STORE_PWD="${WATCH_SIGN_STORE_PASSWORD:-}"
 
-if [ -z "$SIGN_P12" ] && [ -d "$SIGNING_DIR" ]; then
-  # 本地目录约定：见 signing/README.md
-  [ -f "$SIGNING_DIR/credentials.env" ] && {
-    set -a; . "$SIGNING_DIR/credentials.env"; set +a
-    SIGN_ALIAS="${WATCH_SIGN_KEY_ALIAS:-${KEY_ALIAS:-$SIGN_ALIAS}}"
-    SIGN_KEY_PWD="${WATCH_SIGN_KEY_PASSWORD:-${KEY_PASSWORD:-$SIGN_KEY_PWD}}"
-    SIGN_STORE_PWD="${WATCH_SIGN_STORE_PASSWORD:-${STORE_PASSWORD:-$SIGN_STORE_PWD}}"
-  }
-  P12_CANDIDATE="$(find "$SIGNING_DIR" -maxdepth 1 -name '*.p12' -type f 2>/dev/null | head -n 1)"
-  CER_CANDIDATE="$(find "$SIGNING_DIR" -maxdepth 1 -name '*.cer' -type f 2>/dev/null | head -n 1)"
-  PROFILE_CANDIDATE="$(find "$SIGNING_DIR" -maxdepth 1 -name '*.p7b' -type f 2>/dev/null | head -n 1)"
-  [ -n "$P12_CANDIDATE" ] && SIGN_P12="$P12_CANDIDATE"
-  [ -n "$CER_CANDIDATE" ] && SIGN_CER="$CER_CANDIDATE"
-  [ -n "$PROFILE_CANDIDATE" ] && SIGN_PROFILE="$PROFILE_CANDIDATE"
+first_in() { find "$1" -maxdepth 1 -name "$2" -type f 2>/dev/null | head -n 1; }
+
+if [ -d "$SIGNING_DIR" ]; then
+  for f in "$SIGNING_DIR/shared/credentials.env" "$SIGNING_DIR/credentials.env"; do
+    if [ -f "$f" ]; then
+      set -a; . "$f"; set +a
+      break
+    fi
+  done
+  SIGN_ALIAS="${WATCH_SIGN_KEY_ALIAS:-${KEY_ALIAS:-$SIGN_ALIAS}}"
+  SIGN_KEY_PWD="${WATCH_SIGN_KEY_PASSWORD:-${KEY_PASSWORD:-$SIGN_KEY_PWD}}"
+  SIGN_STORE_PWD="${WATCH_SIGN_STORE_PASSWORD:-${STORE_PASSWORD:-$SIGN_STORE_PWD}}"
+
+  if [ -z "$SIGN_P12" ]; then
+    for d in "$SIGNING_DIR/shared" "$SIGNING_DIR"; do
+      c="$(first_in "$d" '*.p12')"
+      [ -n "$c" ] && { SIGN_P12="$c"; break; }
+    done
+  fi
+  # 证书是账号级的（两张 profile 内嵌同一张，DER-SHA256 实测相同），
+  # 所以默认从 shared/ 取。
+  if [ -z "$SIGN_CER" ]; then
+    for d in "$SIGNING_DIR/shared" "$SIGNING_DIR/watch" "$SIGNING_DIR"; do
+      c="$(first_in "$d" '*.cer')"
+      [ -n "$c" ] && { SIGN_CER="$c"; break; }
+    done
+  fi
+  # profile 是**按应用**的：手表只认手表自己的，绝不回退到 phone/
+  if [ -z "$SIGN_PROFILE" ]; then
+    for d in "$SIGNING_DIR/watch" "$SIGNING_DIR"; do
+      c="$(first_in "$d" '*.p7b')"
+      [ -n "$c" ] && { SIGN_PROFILE="$c"; break; }
+    done
+  fi
 fi
 
 HAP_SIGN_TOOL="${HAP_SIGN_TOOL_JAR:-}"
@@ -124,7 +151,7 @@ if [ -n "$SIGN_P12" ] || [ -n "$SIGN_CER" ] || [ -n "$SIGN_PROFILE" ]; then
 
   # 包名预检：profile 授权的包名必须等于本 HAP 的包名。
   # 本机实测过这个坑：拿**手机**的 profile（com.xiwei.suyue）去签
-  # **手表** HAP（com.xiwei.suyue.gt4），hap-sign-tool 照样
+  # **手表** HAP（con.xiwei.suyue.gt4），hap-sign-tool 照样
   # 报 "Sign Hap success!"——证书链有效，但设备按包名校验会拒绝安装。
   # 所以签名前先比对，不匹配就**不签**，退回未签名并说明原因。
   SIGN_MISMATCH=""
@@ -215,7 +242,7 @@ fi
 
 "$REPO_ROOT/tests/build_artifact_check.sh" \
   "$REPO_ROOT/apps/watch/$HAP" \
-  --bundle 'com.xiwei.suyue.gt4' \
+  --bundle 'con.xiwei.suyue.gt4' \
   --device liteWearable \
   --mode "$MODE"
 

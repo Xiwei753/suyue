@@ -6,68 +6,94 @@
 新增文件后请用 `git check-ignore -v <文件>` 复核，别只看 `git status`
 （被忽略的文件在 `git status` 里本来就不显示，容易误判为"已提交"）。
 
-## 文件
+## 布局
 
-| 文件 | 是什么 | 能否复用 |
-|---|---|---|
-| `shared-signing-key.p12` | ECDSA P-256 私钥。别名 `sujian_signing_20261007` | **可复用**（见下） |
-| `suyue-debug.cer` | 现有调试证书，和 `.p12` 私钥匹配 | 同一账号下用途兼容时可跨应用复用 |
-| `suyue-debug.p7b` | **手机**的**调试** provisioning profile | 按应用签发 |
-| `credentials.env` | p12 的别名与口令（`KEY_ALIAS`/`STORE_PASSWORD`/`KEY_PASSWORD`） | — |
-
-## 私钥和匹配证书可以复用，但 profile 不能跨包名复用
-
-这一点此前文档写成了"素笺的证书不能复用"，容易读成整套材料都不能用，
-**不准确**。实际情况是：AGC 的调试证书是从提交的 CSR 签发的，只要
-**同一对密钥**可以在用途与签名类型兼容时跨应用使用同一有效证书，
-但各包名必须分别申请匹配的 profile（.p7b）。
-
-用公钥指纹实测核对（`openssl pkey -pubin -outform DER | openssl dgst -sha256`）：
+按用途分目录。**不要把它们平铺在一起**：手机和手表是华为侧两个独立
+应用，各自的 profile 放在同一层会互相顶替（脚本按名字取第一个匹配文件）。
 
 ```text
-素笺 p12 内的证书公钥        : 3df9743c1798f495ca22e2960affe26289d9a1fdf229abc16c9b67f460a61360
-素阅 suyue-debug.p7b 内开发证书: 3df9743c1798f495ca22e2960affe26289d9a1fdf229abc16c9b67f460a61360
+signing/
+├── README.md
+├── shared/                      两端共用
+│   ├── shared-signing-key.p12   ECDSA P-256 私钥（别名 sujian_signing_20261007）
+│   ├── debug.cer                账号级调试证书链（3 张：叶+中间+根）
+│   └── credentials.env          p12 口令（KEY_ALIAS/STORE_PASSWORD/KEY_PASSWORD）
+├── phone/
+│   └── debug.p7b                手机（com.xiwei.suyue）的调试 profile
+└── watch/
+    └── debug.p7b                手表（con.xiwei.suyue.gt4）的调试 profile
 ```
 
-两者完全一致 → 素笺那把私钥就是素阅的私钥，签名可以直接用。
+## 什么能复用，什么不能
 
-但 **profile 是按应用走的**：`suyue-debug.p7b` 里
+此前文档写成了"素笺的证书不能复用"，容易被读成整套材料都不能用，
+**不准确**。实测结论如下。
 
-- `bundle-name`: `com.xiwei.suyue`
-- `type`: `debug`，`device-ids` 绑定了 2 个 UDID（`device-id-type: udid`）
-- `validity`: 2026-10-09 → 2027-10-09
-- `developer-id`: `70086000204331993`，`issuer`: `app_gallery`
+**私钥可以复用。** 素笺、手机素阅、手表素阅用的是同一对密钥，公钥指纹一致：
 
-profile 绑定包名，**它授权的是 `com.xiwei.suyue`**。
+```text
+素笺 p12 内的证书公钥   : 3df9743c1798f495ca22e2960affe26289d9a1fdf229abc16c9b67f460a61360
+素阅 profile 内开发证书 : 3df9743c1798f495ca22e2960affe26289d9a1fdf229abc16c9b67f460a61360
+```
 
-## ⚠️ 这套材料是**手机**的，不是手表的
+**证书也可以复用**——它是**账号级**的，不是按应用签发的。把两个 profile
+内嵌的 `development-certificate` 取出来算 DER-SHA256，结果完全相同：
 
-`suyue-debug.p7b` 的 `bundle-info.bundle-name` 是 **`com.xiwei.suyue`**，
-这就是**手机应用**的包名（AGC 证书里写定的）。因此：
+```text
+手机 profile (com.xiwei.suyue)      证书 DER-SHA256 = fbdee2e124a2232509b1c614d452bded…
+手表 profile (con.xiwei.suyue.gt4)  证书 DER-SHA256 = fbdee2e124a2232509b1c614d452bded…
+```
 
-- 手机包名已按证书对齐为 `com.xiwei.suyue`
-  （`AppScope/app.json5`、`PeerIdentity.ets` 的 `PHONE_SELF`、
-  手表侧作为对端的 `PeerConfig.PHONE_BUNDLE_NAME` 与 `config.json`
-  的 `supportLists`）。
-- **手表包名现定为** `com.xiwei.suyue.gt4`，原 `com.xiwei753.gt4reader.watch` 是旧版。
-  AGC 应以新包名创建 GT4 应用并签发匹配的调试 Profile（包含 GT4 UDID）。
-  `tests/source-contract.test.mjs` 检查手机和手表两端包名、自述、对端身份、构建检查一致且互不相同。
-- **本目录的 profile 不能用来签手表 HAP**。`tools/build_watch_lite.sh`
-  已加包名预检：profile 授权的包名与 HAP 不一致时**拒绝签名**并退回
-  未签名产物。这个坑很隐蔽——拿手机的 profile 签手表 HAP，
-  `hap-sign-tool` 照样报 `Sign Hap success!`，但设备按包名校验会拒绝安装。
-- 手表自己的 profile 一旦按手表包名签发，可配合现有有效且用途兼容的证书；放进来即可自动启用签名
-  （文件名不限，取目录下第一个 `.p12` / `.cer` / `.p7b`）。
+两者真正不同的是 `app-identifier`（手机 `6917618613178762508`，
+手表 `6917618615525663621`）。
+
+**只有 profile 是按应用的**，它把包名、设备 UDID、有效期绑在一起：
+
+| | 手机 | 手表 |
+|---|---|---|
+| `bundle-name` | `com.xiwei.suyue` | `con.xiwei.suyue.gt4` |
+| `app-identifier` | `6917618613178762508` | `6917618615525663621` |
+| `type` | `debug` | `debug` |
+| `device-id-type` | `udid` | `udid` |
+| 授权设备 | 2 个 UDID | 1 个 UDID（GT 4） |
+| 有效期 | 2026-10-09 → 2027-10-09 | 同 |
+| `developer-id` / `issuer` | `70086000204331993` / `app_gallery` | 同 |
+
+## ⚠️ 手表包名是 `con.xiwei.suyue.gt4`，`con` 不是笔误
+
+AGC 里建手表应用时把 `com` 打成了 `con`，**已确认保留**。原因很实在：
+
+- 华为的 `bundleName` 注册后**不能改**；
+- HAP 的包名必须与 profile 授权的包名**逐字相同**才能安装。
+
+所以别"顺手修正"成 `com.xiwei.suyue.gt4`——一改就签不过、也装不上。
+`tools/build_watch_lite.sh` 的包名预检会直接拒绝签名，
+`tests/source-contract.test.mjs` 也钉住了这个名字。
+
+## 包名预检（很值得留着的一道闸）
+
+`tools/build_watch_lite.sh` 在签名前会比对 profile 的
+`bundle-info.bundle-name` 与 HAP 的 `app.bundleName`，不一致就**拒绝签名**、
+退回未签名产物。这个坑非常隐蔽：
+
+```text
+拿手机 profile（com.xiwei.suyue）去签手表 HAP：
+  hap-sign-tool  -> Sign Hap success!
+  verify-app     -> Digest verify result: true / Verify success
+但设备按包名校验会拒绝安装——"签名成功"完全没有意义。
+```
 
 ## 用法
 
-- **手表（本地已跑通）**：`tools/build_watch_lite.sh release`。脚本按
-  `WATCH_SIGN_*` 环境变量 → `signing/` 目录 的顺序找材料，找到且
-  **包名匹配**时自动走：未签名构建 → `hap-sign-tool sign-app` →
-  `verify-app`，产物 `entry-default-<mode>-signed.hap`。
+- **手表（本地已跑通，产出已签名 HAP）**：`tools/build_watch_lite.sh release`。
+  脚本按 `WATCH_SIGN_*` 环境变量 → `signing/shared` + `signing/watch` 的
+  顺序找材料，找到且**包名匹配**时自动走：未签名构建 →
+  `hap-sign-tool sign-app` → `verify-app`，产物
+  `entry-default-<mode>-signed.hap`。实测结果（含包内嵌 profile 的
+  解析）见 [../docs/WATCH_INSTALL.md](../docs/WATCH_INSTALL.md)。
 - **不要用 hvigor 的 `signingConfigs`**：本机实测在该 legacy Lite 工程上
   `SignHap` 直接失败（`00308018 ENOENT: stat '<dir>/material'`），
-  即使配置形状与 Stage 工程一致。素笺 CI 用的也是下面的绕行路径。
+  即使配置形状与 Stage 工程一致。素笺 CI 用的也是绕行路径。
 - **CI（源码已修，仍待 runner 执行）**：`watch_lite_hap.yml` 改用
   `inject_signing.py --external-signing` 只注入身份/Manifest，并将签名凭据
   放在临时目录；`build_watch_lite.sh` 负责 `sign-app` + `verify-app`。

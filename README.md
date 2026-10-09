@@ -2,7 +2,7 @@
 
 面向 **HUAWEI WATCH GT 4 46 mm（466 × 466 圆屏）** 的个人离线小说阅读器，以及配套的鸿蒙手机传书应用。
 
-> 当前状态：**旧包名版本**的手表 Lite 工程曾在本机编译出未签名 HAP（192 KB，含完整页面快照）。本轮已将手表包名统一为 `com.xiwei.suyue.gt4`，**新包名版本尚未产生真实签名 HAP，也未在 GT4 安装**。已有 `com.xiwei.suyue` Profile 仅属于手机，新手表包名需要独立调试 Profile；手机端 HAP 和双端互通均未验证。
+> 当前状态：**手表 Lite 工程已按新包名 `con.xiwei.suyue.gt4` 真实编译并签名成功**（`entry-default-release-signed.hap`，215,323 字节，`signed=yes`，`verify-app` 报 `Digest verify result: true` / `Verify success`；包内嵌的是手表自己的调试 profile，授权设备含 GT 4 的 UDID）。**但从未在 GT 4 上安装验证**；手机端 HAP 与双端真机互通也未验证。
 
 ## 两个不同的运行环境
 
@@ -29,7 +29,7 @@
 ## 开发与构建
 
 - 手表 Lite Wearable 与手机 Stage 必须分开编译、分开签名，不要混用构建工具链。
-- 手表打包：`tools/build_watch_lite.sh` + `.github/workflows/watch_lite_hap.yml`（自托管 DevEco runner）。**本机已真实编译成功**（release，192,409 字节，未签名）；签名材料放在 gitignore 掉的 `signing/` 目录，来源、包名与"为什么当前拒绝签名"见 [signing/README.md](signing/README.md)。CI 的那个 job 因没有自托管 runner 仍只会排队，排队不是绿灯。安装与待验证清单见 [docs/WATCH_INSTALL.md](docs/WATCH_INSTALL.md)。
+- 手表打包：`tools/build_watch_lite.sh` + `.github/workflows/watch_lite_hap.yml`（自托管 DevEco runner）。**本机已真实编译并签名成功**（release，215,323 字节，`signed=yes`）；签名材料按用途分放在 gitignore 掉的 `signing/shared|phone|watch/`，来源、包名（含 `con` 的来历）与包名预检见 [signing/README.md](signing/README.md)。CI 的那个 job 因没有自托管 runner 仍只会排队，排队不是绿灯。安装与待验证清单见 [docs/WATCH_INSTALL.md](docs/WATCH_INSTALL.md)。
 - 手表端有一条必须知道的运行时限制：Lite 的 JerryScript **没有 RegExp**，正则字面量会让页面 `.bc` 快照静默生成失败（构建仍报成功、手表上却打不开）。实测范围与两道守门见 [apps/watch/README.md](apps/watch/README.md#lite-运行时限制本机实测issue-2)。
 - 手机打包：`tools/build_phone_hap.sh` + `.github/workflows/phone_hap.yml`（自托管 DevEco runner；签名材料经 Secrets 注入）。**尚未实际运行，未产出 HAP**。
 - 首先验证 GT 4 46mm 支持哪组 Lite SDK/IDE + 签名 + DevEco Assistant 安装流程，才配置真正能产生 signed HAP 的 CI。
@@ -52,7 +52,14 @@ tests/            与系统 SDK 无关的静态检查/分页测试
 
 产品名称为「素阅」，仓库名为 `suyue`。
 
-- 手表 HAP 包名已经确定为 **`com.xiwei.suyue.gt4`**（原 `com.xiwei753.gt4reader.watch` 仅作为旧版历史记录）。必须在 AGC 以这个新包名创建手表应用并申请独立调试 Profile。
+- 手表 HAP 包名 = **`con.xiwei.suyue.gt4`**，手机 HAP 包名 = **`com.xiwei.suyue`**，
+  在华为侧是**两个独立应用**。注意手表那个是 **`con`** 而不是 `com`——
+  AGC 里注册时打错、已确认保留（bundleName 注册后不能改，且必须与
+  profile 逐字一致才能安装；"顺手修正"会导致签不过、也装不上）。
+- 手表的独立调试 Profile 已签发（授权包名 `con.xiwei.suyue.gt4`、
+  授权设备含 GT 4 的 UDID）。**私钥与证书可复用**（证书是账号级的：
+  手机与手表两张 profile 内嵌的 `development-certificate` DER-SHA256
+  实测相同 `fbdee2e1…`），**只有 profile 是按应用签发的**。
 - 手机 HAP 包名已按 AGC 证书对齐为 **`com.xiwei.suyue`**（证书里写定的名字），
   同步改了 `AppScope/app.json5`、手机端 `PeerIdentity.ets` 的 `PHONE_SELF`、
   手表侧作为对端的 `PeerConfig.PHONE_BUNDLE_NAME` 与 `config.json` 的

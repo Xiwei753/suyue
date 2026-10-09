@@ -14,6 +14,26 @@ let subscribed = false;
 let receiver = null;
 // 手表 → 手机的唯一回执通道（wearengine.sendMsg）。
 var sendToPhoneImpl = null;
+// 对端 deviceId。'remote' 是照华为 Lite 示例写的**占位回退值**，
+// 从未在真机上确认过；subscribeMsg 回调里若带真实 deviceId 就采用它。
+var peerDeviceId = '';
+var warnedDeviceIdFallback = false;
+
+// 回调里可能携带 deviceId 的候选字段名（与文件引用一样逐一探测，
+// 不合成、不猜测具体值）。真机抓到后应把命中的字段名固化下来。
+var DEVICE_ID_FIELDS = ['deviceId', 'deviceID', 'srcDeviceId', 'srcDeviceID'];
+
+export function capturePeerDevice(data) {
+  if (!data) return '';
+  for (var i = 0; i < DEVICE_ID_FIELDS.length; i++) {
+    var value = data[DEVICE_ID_FIELDS[i]];
+    if (typeof value === 'string' && value.length > 0) {
+      peerDeviceId = value;
+      return DEVICE_ID_FIELDS[i];
+    }
+  }
+  return '';
+}
 
 export function beginReceive(onStatus) {
   const notify = (message) => {
@@ -28,9 +48,20 @@ export function beginReceive(onStatus) {
   //   wearengine.sendMsg({deviceId, bundleName,
   //     abilityName, message, success, fail})
   const sendToPhone = (text) => {
+    var deviceId = peerDeviceId;
+    if (!deviceId) {
+      // 不静默拿占位值冒充真值：告警一次，日志里能看出这条回执是
+      // 走的未验证回退路径。真机确认后应改为拿到 deviceId 再发送。
+      if (!warnedDeviceIdFallback) {
+        warnedDeviceIdFallback = true;
+        console.warn('sendMsg 使用未验证的占位 deviceId "remote"：'
+          + '回调中未取得真实 deviceId，回执能否送达待真机确认');
+      }
+      deviceId = 'remote';
+    }
     try {
       wearengine.sendMsg({
-        deviceId: 'remote',
+        deviceId: deviceId,
         bundleName: PHONE_BUNDLE_NAME,
         abilityName: '',
         message: text,
@@ -65,6 +96,12 @@ export function beginReceive(onStatus) {
                   notify, sendToPhone);
                 wearengine.subscribeMsg({
                   success: (data) => {
+                    // 先尽力取真实 deviceId，供回执使用；
+                    // 取到就记下命中的字段名，便于真机核对。
+                    const idField = capturePeerDevice(data);
+                    if (idField) {
+                      console.info('peer deviceId via data.' + idField);
+                    }
                     if (data && data.isRegister) {
                       subscribed = true;
                       notify('传书接收已开启');

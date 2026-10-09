@@ -63,9 +63,13 @@
   候选字段 `file`/`name`/`uri`/`filePath`（上游示例用
   `data.file`，**以真机回调实测为准**）；收到后
   复制入沙箱、按片校验整本 SHA-256 再入库；
-- 回执发送：`wearengine.sendMsg({deviceId: 'remote',
-  bundleName: <手机包名>, abilityName: '', message})`
-  （形状以上游 Lite 示例为准，待真机验证）。
+- 回执发送：`wearengine.sendMsg({deviceId, bundleName:
+  <手机包名>, abilityName: '', message})`。**`deviceId: 'remote'
+  是照上游 Lite 示例写的占位回退值，从未在真机确认过**：
+  实现会先从订阅回调里探测真实 `deviceId`
+  （候选字段 `deviceId`/`deviceID`/`srcDeviceId`/`srcDeviceID`），
+  取到就用真值；取不到才回退并 `console.warn` 一次，
+  日志里能看出这条回执走的是未验证路径。
 - Manifest 授权：`config.json` 的
   `metaData.customizeData[supportLists]` 必须为
   `<手机包名>:<手机证书指纹>`；构建期由

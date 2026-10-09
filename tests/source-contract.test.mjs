@@ -231,9 +231,12 @@ assert.ok(peerIdentity.includes('PHONE_SELF'),
   'PeerIdentity must define PHONE_SELF');
 assert.ok(peerIdentity.includes('WATCH_PEER'),
   'PeerIdentity must define WATCH_PEER');
-// issue #2：手机包名对齐 AGC 证书里的 com.xiwei.suyue；
-// 手表包名已确认：com.xiwei.suyue.gt4。
-const WATCH_BUNDLE = 'com.xiwei.suyue.gt4';
+// issue #2：手机与手表是华为侧**两个独立应用**：
+//   手机 com.xiwei.suyue      （AGC 证书里写定的名字）
+//   手表 con.xiwei.suyue.gt4  （注意是 con 不是 com —— AGC 里当初打错，
+//                              已确认保留；bundleName 注册后改不了，
+//                              且必须与 profile 逐字一致才能安装）
+const WATCH_BUNDLE = 'con.xiwei.suyue.gt4';
 const PHONE_BUNDLE = 'com.xiwei.suyue';
 assert.ok(
   peerIdentity.includes("'" + PHONE_BUNDLE + "'") &&

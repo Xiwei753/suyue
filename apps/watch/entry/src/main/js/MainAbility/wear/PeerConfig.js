@@ -18,5 +18,13 @@ export const PHONE_BUNDLE_NAME =
   'com.xiwei.suyue';
 export const PHONE_CERT_FINGERPRINT =
   INJECTED_PHONE_FINGERPRINT;
+// 注意：这里是 **con**.xiwei.suyue.gt4，不是 com。
+// 这是 AGC 里手表应用**实际注册**的包名（当初录入时打错，已确认保留）：
+// 华为的 bundleName 注册后不能改，而 HAP 的包名必须与 profile 授权的
+// 包名逐字相同才能安装。别"顺手修正"成 com —— 一改就签不过、
+// 也装不上（构建脚本的包名预检会直接拒绝签名）。
+//
+// 手表与手机是华为侧两个独立应用，Wear Engine 靠
+// (包名, 证书指纹) 识别对端，所以两者**必须不同**。
 export const WATCH_BUNDLE_NAME =
-  'com.xiwei.suyue.gt4';
+  'con.xiwei.suyue.gt4';
