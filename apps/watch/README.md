@@ -62,11 +62,11 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
 - 本地构建：`tools/build_watch_lite.sh debug|release`；需要 DevEco `hvigorw` 与 Lite Wearable SDK，缺失时明确报错，不用 Node 检查冒充构建。
 - **本机已真实编译成功；签名目前被拒绝，产物是未签名的**（release）：
   `entry-default-unsigned.hap`，192,409 字节。原因不是缺材料，而是
-  `signing/` 里现有的证书/profile 属于**手机**（包名 `com.xiwei.suyue`），
+  `signing/` 里现有的 Profile 授权**手机**（包名 `com.xiwei.suyue`），
   与手表 HAP 的包名不一致，脚本按包名预检**拒绝签名**并退回未签名产物。
   这个坑很隐蔽：拿手机 profile 签手表 HAP，`hap-sign-tool` 照样报
   `Sign Hap success!`，但设备按包名校验会拒绝安装——"签名成功"没有意义。
-  **手表自己的证书/profile 尚未签发。**
+  **手表包名专属的 Profile 尚未签发**；有效且用途匹配的 `.p12` / `.cer` 可复用。
   包内快照齐全：`app.bc` (806 B)、`pages/index/index.bc` (29,938 B)、
   `pages/reader/reader.bc` (21,802 B)。
 - **包名**：手表仍是历史值 `com.xiwei753.gt4reader.watch`，**待确认后另改**；
@@ -84,7 +84,7 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
   字节）塞进 HAP，整包膨胀到 4.45 MB。改成与上游示例一致的
   104×104 / 92×92 后，`.bin` 降到 43,272 / 33,864 字节，HAP 只有
   190 KB 量级。
-- CI：`.github/workflows/watch_lite_hap.yml`（自托管 `hmos-deveco` runner；签名材料经 `secrets.WATCH_SIGNING_MATERIAL` 注入；产物只上传 HAP）。**注意该 job 目前在排队而非运行**：GitHub 托管机装不了 Lite SDK，必须先注册带工具链的自托管 runner。另外该 workflow 目前仍走 hvigor 的 `signingConfigs` 注入路径，**为本机实测失败的那条**（见上），需要改成 `hap-sign-tool sign-app` 才能产出签名 HAP。
+- CI：`.github/workflows/watch_lite_hap.yml`（自托管 `hmos-deveco` runner；签名材料经 `secrets.WATCH_SIGNING_MATERIAL` 注入；产物只上传 HAP）。**注意该 job 目前在排队而非运行**：GitHub 托管机装不了 Lite SDK，必须先注册带工具链的自托管 runner。该 workflow 的源码现已改成先产出未签名 Lite HAP，再用 `hap-sign-tool sign-app` 签名并 `verify-app` 验签；**但自托管 Runner 仍未运行，暂不能称 CI 构建通过**。
 - 安装步骤与待验证清单：[../../docs/WATCH_INSTALL.md](../../docs/WATCH_INSTALL.md)。
 - **尚未在任何真机上安装或运行；`6.1.1(24)` 版本号待 GT 4 真机核对。**
 
@@ -92,7 +92,7 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
 
 - 手机发书 → 手表接收文件 → 校验 → 加入书架的完整闭环；Wear Engine 文件通道回调字段待真机确认。
 - **签名**：现有签名材料属于手机（`com.xiwei.suyue`），**手表自己的
-  证书/profile 尚未签发**，所以手表只能产出未签名 HAP；包名匹配后签名
+  Profile 尚未签发**，所以手表只能产出未签名 HAP；包名匹配后签名
   与"可安装"状态才谈得上验证。
 - 表冠翻页：机制已接入并通过纯逻辑单测，但 **GT4 是否真的下发旋转事件、
   每页阈值多少，必须真机实测**（见 `reader/CrownInput.js` 顶部说明）。

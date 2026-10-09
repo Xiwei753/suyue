@@ -87,6 +87,12 @@ assert.ok(watchReader.includes('normalizeSettings'),
   'reader must use ReaderSettings as single truth');
 assert.ok(watchReader.includes('createCrownTracker'),
   'reader must route crown rotation through CrownInput tracker');
+const toggleThemeBody = watchReader.slice(
+  watchReader.indexOf('  toggleTheme() {'),
+  watchReader.indexOf('  // 展开/收起设置行'));
+assert.ok(toggleThemeBody.includes('saveProgress(') &&
+  toggleThemeBody.includes('this.currentSettings()'),
+  'theme switch must persist settings without waiting for another page turn');
 assert.ok(watchReader.includes('crownProxy'),
   'reader must own the hidden slider ref used as crown proxy');
 const crownInput = read('apps/watch/entry/src/main/js/MainAbility/reader/CrownInput.js');

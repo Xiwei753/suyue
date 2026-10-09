@@ -134,9 +134,20 @@ export default {
     this.fontSize = next;
     this.loadPage(this.offset);
   },
-  // 切换日间/夜间主题（仅配色，不影响排版）。
+  // 切换主题不重新分页，但要立即保存：用户可能直接返回书架。
   toggleTheme() {
-    this.theme = this.theme === 'night' ? 'day' : 'night';
+    if (this.isBusy || !this.bookId) return;
+    const oldTheme = this.theme;
+    this.theme = oldTheme === 'night' ? 'day' : 'night';
+    this.isBusy = true;
+    saveProgress(this.bookId, this.offset, this.history,
+      this.currentSettings(), (state) => {
+        if (!state.ok) {
+          this.theme = oldTheme;
+          this.pageHint = '主题保存失败';
+        }
+        this.isBusy = false;
+      });
   },
   // 展开/收起设置行（字号、主题）。
   toggleSettings() {
