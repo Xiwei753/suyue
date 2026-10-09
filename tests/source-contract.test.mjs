@@ -217,8 +217,18 @@ assert.ok(
   peerIdentity.includes(
     "'com.xiwei753.gt4reader.phone'") &&
   peerIdentity.includes(
-    "'com.xiwei753.gt4reader.watch'"),
+    "'com.xiwei.suyue'"),
   'both peer bundle names must be defined');
+// issue #2：手表包名从历史值 com.xiwei753.gt4reader.watch 改为
+// com.xiwei.suyue，以匹配 AGC 签发 profile 授权的包名。三处必须一致：
+// 手表 Manifest（签名/安装按它校验）、手表 PeerConfig 的自述、
+// 手机端把谁当 remoteApp。
+assert.equal(watchConfig.app.bundleName, 'com.xiwei.suyue',
+  'watch Manifest bundleName must match the signed profile');
+assert.ok(
+  read('apps/watch/entry/src/main/js/MainAbility/wear/PeerConfig.js')
+    .includes("'com.xiwei.suyue'"),
+  'watch PeerConfig must self-report the same bundle name as its Manifest');
 assert.ok(!phoneIndexFull.includes('phoneFingerprint'),
   'phone index must not carry a loose phoneFingerprint');
 assert.ok(phoneIndexFull.includes('WATCH_PEER'),

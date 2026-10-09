@@ -24,6 +24,15 @@
 *.pem
 *.key
 *.mobileprovision
+# 证书与 provisioning profile 同样绝不能进仓库：
+# *.p12 本来就被挡住，但 *.cer / *.p7b / *.csr 之前
+# **没有**规则——把它们放进 signing/ 时会被 git add 收走。
+*.cer
+*.p7b
+*.csr
+# 本地签名材料目录（内容不入库，仅目录说明 README 入库）
+/signing/*
+!/signing/README.md
 **/signing-config.json
 **/signing-config.json5
 .env

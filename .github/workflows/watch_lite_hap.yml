@@ -102,7 +102,7 @@ jobs:
           PHONE_FP="$(printf '%s' "$WATCH_SIGNING_MATERIAL" | python3 -c \
             'import json,sys; print(json.load(sys.stdin)["fingerprints"]["phone"])')"
           tests/build_artifact_check.sh "${{ steps.hap.outputs.path }}" \
-            --bundle com.xiwei753.gt4reader.watch \
+            --bundle com.xiwei.suyue \
             --device liteWearable \
             --mode release \
             --expect-fingerprint "$PHONE_FP"

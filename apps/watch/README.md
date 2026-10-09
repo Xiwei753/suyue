@@ -60,24 +60,31 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
 
 - 工程结构已对齐 Lite Wearable 参考示例（`build-profile.json5` 含 `signingConfig`/`strictMode`、`hvigor/hvigor-config.json5`、`entry/hvigorfile.ts`、`resources/base/media/icon{,_small}.png`、`config.json` 的 `"$media:icon"`）。
 - 本地构建：`tools/build_watch_lite.sh debug|release`；需要 DevEco `hvigorw` 与 Lite Wearable SDK，缺失时明确报错，不用 Node 检查冒充构建。
-- **本机已真实编译成功**（release）：产物 `entry-default-unsigned.hap`，
-  稳定在 192,447 字节，含 `app.bc` (806 B)、`pages/index/index.bc`
-  (29,938 B)、`pages/reader/reader.bc` (21,802 B)。
-  **HAP 的 SHA-256 每次构建都不一样**：同一个提交重编两次得到
-  `8626dd67…` 和 `6f20a524…`，字节数相同——打包过程写入时间戳，
-  不是可复现构建。所以核对产物要认 `.bc` 条目与其大小，
-  不要把某个 SHA 当内容指纹。
-- **该产物未签名**：`build-profile.json5` 的 `signingConfigs` 为空，
-  hvigor 报 `Will skip sign 'hos_hap'`。**未签名 HAP 装不到 GT 4**，
-  所以第 1 阶段验收仍**未通过**——缺的不是构建，是素阅自己的华为
-  签名材料（`.p12`/`.cer`/`.profile`）。素笺的证书不能复用：profile
-  绑定包名，且议题 #2 明确要求本项目独立证书。
+- **本机已真实编译并签名成功**（release）：产物
+  `entry-default-release-signed.hap`，211,287 字节，
+  `build_artifact_check.sh` 报 `signed=yes`，`hap-sign-tool verify-app`
+  报 `Digest verify result: true` / `verify: Verify success`。
+  包内 `app.bc` (806 B)、`pages/index/index.bc` (29,938 B)、
+  `pages/reader/reader.bc` (21,802 B)。
+- **HAP 不是可复现构建**：SHA-256 每次都不一样（打包写入时间戳）。
+  核对产物请认 `.bc` 条目与体积，别把某个 SHA 当内容指纹。
+- **包名**：手表 HAP 用 `com.xiwei.suyue`（匹配 AGC profile 授权的
+  包名）。历史值 `com.xiwei753.gt4reader.watch` 已弃用。
+  手机端包名仍为 `com.xiwei753.gt4reader.phone`。
+- 签名走的是**未签名构建 + `hap-sign-tool sign-app`**：hvigor 的
+  `signingConfigs` 在这个 legacy Lite 工程上实测失败
+  （`SignHap` → `00308018 ENOENT: stat '<dir>/material'`），
+  与素笺 CI 采用同一条绕行路径。材料放在 gitignore 掉的
+  `signing/` 目录，说明见 [signing/README.md](../../signing/README.md)。
+- **仍未在真机安装验证**：签名只证明包完整、证书链有效，
+  不代表 GT 4 接受安装（profile 是 debug 类型、绑定 UDID，
+  且设备端还会校验包名/UDID/有效期）。
 - 图标必须小尺寸：`tools/gen_watch_icons.py` 曾生成 1024×1024 的
   `icon.png`，Lite 资源转换把它展成原始 RGBA（1024²×4+8 = 4,194,312
   字节）塞进 HAP，整包膨胀到 4.45 MB。改成与上游示例一致的
   104×104 / 92×92 后，`.bin` 降到 43,272 / 33,864 字节，HAP 只有
   190 KB 量级。
-- CI：`.github/workflows/watch_lite_hap.yml`（自托管 `hmos-deveco` runner；签名材料经 `secrets.WATCH_SIGNING_MATERIAL` 注入；产物只上传 HAP）。**注意该 job 目前在排队而非运行**：GitHub 托管机装不了 Lite SDK，必须先注册带工具链的自托管 runner。
+- CI：`.github/workflows/watch_lite_hap.yml`（自托管 `hmos-deveco` runner；签名材料经 `secrets.WATCH_SIGNING_MATERIAL` 注入；产物只上传 HAP）。**注意该 job 目前在排队而非运行**：GitHub 托管机装不了 Lite SDK，必须先注册带工具链的自托管 runner。另外该 workflow 目前仍走 hvigor 的 `signingConfigs` 注入路径，**为本机实测失败的那条**（见上），需要改成 `hap-sign-tool sign-app` 才能产出签名 HAP。
 - 安装步骤与待验证清单：[../../docs/WATCH_INSTALL.md](../../docs/WATCH_INSTALL.md)。
 - **尚未在任何真机上安装或运行；`6.1.1(24)` 版本号待 GT 4 真机核对。**
 

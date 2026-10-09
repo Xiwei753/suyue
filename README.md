@@ -2,7 +2,7 @@
 
 面向 **HUAWEI WATCH GT 4 46 mm（466 × 466 圆屏）** 的个人离线小说阅读器，以及配套的鸿蒙手机传书应用。
 
-> 当前状态：**手表 Lite 工程已在本机真实编译出 HAP**（含完整 JerryScript 快照，192,447 字节），但**未签名，因此还装不到 GT 4**；手机端 HAP 未产出，双端真机互通未验证。签名材料是当前第一道实际阻断。
+> 当前状态：**手表 Lite 工程已在本机真实编译并签名成功**（`entry-default-release-signed.hap`，211,287 字节，`verify-app` 报 `Verify success`），但**尚未在 GT 4 上安装验证**；手机端 HAP 未产出，双端真机互通未验证。
 
 ## 两个不同的运行环境
 
@@ -29,7 +29,7 @@
 ## 开发与构建
 
 - 手表 Lite Wearable 与手机 Stage 必须分开编译、分开签名，不要混用构建工具链。
-- 手表打包：`tools/build_watch_lite.sh` + `.github/workflows/watch_lite_hap.yml`（自托管 DevEco runner；签名材料经 Secrets 注入）。**本机已真实编译出 HAP**（release，192,447 字节，未签名）；CI 的那个 job 因没有自托管 runner 仍只会排队，排队不是绿灯。安装与待验证清单见 [docs/WATCH_INSTALL.md](docs/WATCH_INSTALL.md)。
+- 手表打包：`tools/build_watch_lite.sh` + `.github/workflows/watch_lite_hap.yml`（自托管 DevEco runner）。**本机已真实编译并签名成功**（release，211,287 字节，`signed=yes`）；签名材料放在 gitignore 掉的 `signing/` 目录，来源与包名说明见 [signing/README.md](signing/README.md)。CI 的那个 job 因没有自托管 runner 仍只会排队，排队不是绿灯。安装与待验证清单见 [docs/WATCH_INSTALL.md](docs/WATCH_INSTALL.md)。
 - 手表端有一条必须知道的运行时限制：Lite 的 JerryScript **没有 RegExp**，正则字面量会让页面 `.bc` 快照静默生成失败（构建仍报成功、手表上却打不开）。实测范围与两道守门见 [apps/watch/README.md](apps/watch/README.md#lite-运行时限制本机实测issue-2)。
 - 手机打包：`tools/build_phone_hap.sh` + `.github/workflows/phone_hap.yml`（自托管 DevEco runner；签名材料经 Secrets 注入）。**尚未实际运行，未产出 HAP**。
 - 首先验证 GT 4 46mm 支持哪组 Lite SDK/IDE + 签名 + DevEco Assistant 安装流程，才配置真正能产生 signed HAP 的 CI。
@@ -50,7 +50,16 @@ tests/            与系统 SDK 无关的静态检查/分页测试
 
 ## 名称和包名
 
-产品名称为「素阅」，仓库名为 `suyue`。为避免签名指纹、配对设置和以后阅读进度路径发生无谓变化，历史包名 `com.xiwei753.gt4reader.watch`、`com.xiwei753.gt4reader.phone` 以及应用内部文件路径暂不改动。**显示名称改了，不等于应用包名也要改。**
+产品名称为「素阅」，仓库名为 `suyue`。
+
+- **手表 HAP 包名为 `com.xiwei.suyue`**，用于匹配 AGC 签发 profile 授权的
+  包名。历史值 `com.xiwei753.gt4reader.watch` 已弃用；改动同步到了
+  `config.json`、`wear/PeerConfig.js`、手机端 `PeerIdentity.ets` 的
+  `WATCH_PEER`、构建脚本与 CI 的 `--bundle`，并由
+  `tests/source-contract.test.mjs` 强制校验一致性。
+- **手机端包名仍为 `com.xiwei753.gt4reader.phone`**，未改。
+- 应用内部文件路径（`internal://app/gt4reader/...`）保持不变：改它会让
+  已装设备上的阅读进度全部失联，收益为零。
 
 ## 授权
 
