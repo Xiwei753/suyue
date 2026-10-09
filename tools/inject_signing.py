@@ -30,6 +30,7 @@ import base64
 import json
 import os
 import re
+import shlex
 import sys
 
 HEX64 = re.compile(r'^[0-9a-f]{64}$')
@@ -90,8 +91,10 @@ def main():
                     help='SIGNING_MATERIAL 环境变量（JSON）')
     ap.add_argument('--signing-dir', required=True,
                     help='材料落盘目录（跨 step 持久）')
-    ap.add_argument('--build-profile', required=True,
+    ap.add_argument('--build-profile', default='',
                     help='要写入 signingConfigs 的 build-profile.json5')
+    ap.add_argument('--external-signing', action='store_true',
+                    help='Lite HAP 走独立 sign-app，不注入 legacy signingConfigs；输出本地签名凭据')
     ap.add_argument('--identity-file', required=True,
                     help='身份配置文件（注入对端指纹）')
     ap.add_argument('--identity-var', required=True,
@@ -140,34 +143,50 @@ def main():
             handle.write(raw)
         paths[field] = target
 
-    # 真实 signingConfigs：替换空数组。
-    sign_alg = material.get('signAlg',
-                            'SHA256withECDSA')
-    block = {
-        'name': 'default',
-        'type': 'HarmonyOS',
-        'material': {
-            'storeFile': paths['storeFileB64'],
-            'certpath': paths['certpathB64'],
-            'profile': paths['profileB64'],
-            'signAlg': sign_alg,
-            'storePassword': material['storePassword'],
-            'keyAlias': material['keyAlias'],
-            'keyPassword': material['keyPassword'],
+    # legacy Lite 的 SignHap 会查找不存在的 material 目录。
+    # 外部签名模式只落盘凭据，让 build_watch_lite.sh 走
+    # unsigned -> sign-app -> verify-app；手机 Stage 路径保持不变。
+    if args.external_signing:
+        env_path = os.path.join(args.signing_dir, 'credentials.env')
+        with open(env_path, 'w', encoding='utf-8') as handle:
+            for key, value in (
+                ('KEY_ALIAS', material['keyAlias']),
+                ('KEY_PASSWORD', material['keyPassword']),
+                ('STORE_PASSWORD', material['storePassword']),
+            ):
+                handle.write(key + '=' + shlex.quote(str(value)) + '\\n')
+        os.chmod(env_path, 0o600)
+    else:
+        if not args.build_profile:
+            fail('非 external-signing 模式必须指定 --build-profile')
+        # 真实 signingConfigs：替换空数组。
+        sign_alg = material.get('signAlg',
+                                'SHA256withECDSA')
+        block = {
+            'name': 'default',
+            'type': 'HarmonyOS',
+            'material': {
+                'storeFile': paths['storeFileB64'],
+                'certpath': paths['certpathB64'],
+                'profile': paths['profileB64'],
+                'signAlg': sign_alg,
+                'storePassword': material['storePassword'],
+                'keyAlias': material['keyAlias'],
+                'keyPassword': material['keyPassword'],
+            }
         }
-    }
-    with open(args.build_profile, 'r',
-              encoding='utf-8') as handle:
-        profile_text = handle.read()
-    if '"signingConfigs": []' not in profile_text:
-        fail('build-profile.json5 中未找到 '
-             '"signingConfigs": []')
-    profile_text = profile_text.replace(
-        '"signingConfigs": []',
-        '"signingConfigs": ' + json.dumps([block]))
-    with open(args.build_profile, 'w',
-              encoding='utf-8') as handle:
-        handle.write(profile_text)
+        with open(args.build_profile, 'r',
+                  encoding='utf-8') as handle:
+            profile_text = handle.read()
+        if '"signingConfigs": []' not in profile_text:
+            fail('build-profile.json5 中未找到 '
+                 '"signingConfigs": []')
+        profile_text = profile_text.replace(
+            '"signingConfigs": []',
+            '"signingConfigs": ' + json.dumps([block]))
+        with open(args.build_profile, 'w',
+                  encoding='utf-8') as handle:
+            handle.write(profile_text)
 
     # 对端证书指纹注入身份配置。
     fingerprints = material.get('fingerprints') or {}

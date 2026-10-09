@@ -21,7 +21,7 @@ name: Watch Lite HAP build (self-hosted DevEco required)
 # 签名材料（secrets.WATCH_SIGNING_MATERIAL，JSON）：
 #   storeFileB64/certpathB64/profileB64: base64 编码的签名文件
 #   keyAlias/keyPassword/storePassword: 口令
-#   signAlg: 默认 SHA256withECDSA
+#   signAlg: 默认 SHA256withECDSA（Lite sign-app 固定此算法）
 #   fingerprints: {"phone": <手机证书指纹>, "watch": <手表证书指纹>}
 #   —— 手机指纹同时注入：
 #      (a) 手表 JS PhonePeerConfig.g.js（消息来源门控）；
@@ -57,8 +57,9 @@ jobs:
             exit 1
           fi
 
-      - name: Stage signing material and signingConfigs
-        # 材料写入 $RUNNER_TEMP（跨 step 持久），
+      - name: Stage signing material and Lite identity
+# 材料写入 $RUNNER_TEMP（跨 step 持久），
+        # 不把 signingConfigs 注入 legacy Lite 构建（会触发 SignHap 错误）。
         # 不在本 step 末尾删除（旧实现的 trap
         # 会在本 step 结束时删掉材料，导致
         # 构建 step 读不到——施工单 P1-7）。
@@ -69,7 +70,7 @@ jobs:
           python3 tools/inject_signing.py \
             --material-json "$WATCH_SIGNING_MATERIAL" \
             --signing-dir "$RUNNER_TEMP/suyue-signing" \
-            --build-profile apps/watch/build-profile.json5 \
+            --external-signing \
             --identity-file apps/watch/entry/src/main/js/MainAbility/wear/PhonePeerConfig.g.js \
             --identity-var INJECTED_PHONE_FINGERPRINT \
             --fingerprint-key phone \
@@ -77,7 +78,10 @@ jobs:
             --manifest apps/watch/entry/src/main/config.json \
             --manifest-peer-bundle com.xiwei.suyue
 
-      - name: Build Lite Wearable HAP
+      - name: Build and sign Lite Wearable HAP
+        env:
+          WATCH_SIGNING_DIR: ${{ runner.temp }}/suyue-signing
+          HAP_SIGN_TOOL_JAR: ${{ vars.HAP_SIGN_TOOL_JAR }}
         run: tools/build_watch_lite.sh release
 
       - name: Locate HAP

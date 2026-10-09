@@ -43,7 +43,7 @@ function stage(prefix, fingerprint, options = {}) {
     manifest);
   const args = [
     join(REPO, 'tools/inject_signing.py'),
-    '--material-json', material(fingerprint),
+    '--material-json', material(fingerprint, options.extra || {}),
     '--signing-dir', join(dir, 'staged'),
     '--build-profile', buildProfile,
     '--identity-file', identity,
@@ -55,6 +55,7 @@ function stage(prefix, fingerprint, options = {}) {
   if (options.format) {
     args.push('--fingerprint-format', options.format);
   }
+  if (options.external) args.push('--external-signing');
   const run = spawnSync('python3', args,
     { encoding: 'utf8' });
   return { dir, buildProfile, identity, manifest, run };
@@ -155,6 +156,24 @@ const { createRequire } = await import('node:module');
 {
   const s = stage('missing-fp', '');
   assert.notEqual(s.run.status, 0, 'empty fingerprint must fail');
+}
+
+// ---- 7. Lite 外部签名：不触发 legacy SignHap，凭据能安全载入 ----
+{
+  const s = stage('lite-external', 'ac'.repeat(32), {
+    external: true,
+    extra: { keyPassword: "a' b$\\\\c" }
+  });
+  assert.equal(s.run.status, 0, s.run.stderr);
+  assert.equal(readFileSync(s.buildProfile, 'utf8'),
+    readFileSync(join(REPO, 'apps/watch/build-profile.json5'), 'utf8'),
+    'Lite legacy signingConfigs must remain empty');
+  const envFile = join(s.dir, 'staged/credentials.env');
+  const loaded = spawnSync('bash', [
+    '-c', 'source "$1"; printf "%s" "$KEY_PASSWORD"', 'bash', envFile
+  ], { encoding: 'utf8' });
+  assert.equal(loaded.status, 0, loaded.stderr);
+  assert.equal(loaded.stdout, "a' b$\\\\c");
 }
 
 console.info('PASS: signing injection (manifest ' +
