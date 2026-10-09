@@ -61,9 +61,12 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
 - 工程结构已对齐 Lite Wearable 参考示例（`build-profile.json5` 含 `signingConfig`/`strictMode`、`hvigor/hvigor-config.json5`、`entry/hvigorfile.ts`、`resources/base/media/icon{,_small}.png`、`config.json` 的 `"$media:icon"`）。
 - 本地构建：`tools/build_watch_lite.sh debug|release`；需要 DevEco `hvigorw` 与 Lite Wearable SDK，缺失时明确报错，不用 Node 检查冒充构建。
 - **本机已真实编译成功**（release）：产物 `entry-default-unsigned.hap`，
-  192,447 字节，SHA-256
-  `8626dd671e200cb638fc9a7fb2172c659e1c728d09bdeb5caec722c85ac725fe`，
-  含 `app.bc` / `pages/index/index.bc` / `pages/reader/reader.bc`。
+  稳定在 192,447 字节，含 `app.bc` (806 B)、`pages/index/index.bc`
+  (29,938 B)、`pages/reader/reader.bc` (21,802 B)。
+  **HAP 的 SHA-256 每次构建都不一样**：同一个提交重编两次得到
+  `8626dd67…` 和 `6f20a524…`，字节数相同——打包过程写入时间戳，
+  不是可复现构建。所以核对产物要认 `.bc` 条目与其大小，
+  不要把某个 SHA 当内容指纹。
 - **该产物未签名**：`build-profile.json5` 的 `signingConfigs` 为空，
   hvigor 报 `Will skip sign 'hos_hap'`。**未签名 HAP 装不到 GT 4**，
   所以第 1 阶段验收仍**未通过**——缺的不是构建，是素阅自己的华为

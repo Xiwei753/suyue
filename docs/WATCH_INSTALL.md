@@ -32,17 +32,22 @@ tools/build_watch_lite.sh release    # 或 debug
 脚本要求 `hvigorw` 存在于 PATH；缺失时明确报错退出，不会把 Node
 静态检查伪装成构建成功。构建成功后输出 HAP 路径、大小与 SHA-256。
 
-**本机实测结果（`tools/build_watch_lite.sh release`）**：
+**本机实测结果（`tools/build_watch_lite.sh release`，提交 `bbfc665`）**：
 
 ```text
 HAP_PATH=apps/watch/entry/build/default/outputs/default/entry-default-unsigned.hap
+WARN: HAP is unsigned (no signingConfigs): entry-default-unsigned.hap
 HAP_OK manifest=config.json size=192447 mode=release signed=no
-       sha256=8626dd671e200cb638fc9a7fb2172c659e1c728d09bdeb5caec722c85ac725fe
+       sha256=6f20a5240d0a830125ad40ad2610078523561adcf2b4eedec9e8e849cc396a75
 ```
 
 - HAP 内快照齐全：`app.bc` (806 B)、`pages/index/index.bc` (29,938 B)、
   `pages/reader/reader.bc` (21,802 B)。
 - 资源：`icon.png.bin` 43,272 B、`icon_small.png.bin` 33,864 B。
+- **SHA-256 不可复现**：同一提交 `bbfc665` 重编两次得到
+  `8626dd67…` 与 `6f20a524…`，体积都是 192,447 字节——打包写入时间戳。
+  验收请比对 `.bc` 条目与体积，而不是把 SHA 当内容指纹；
+  真正需要内容承诺时要另做可复现构建。
 - `signed=no`：`build-profile.json5` 的 `signingConfigs` 为空，
   hvigor 日志为 `Will skip sign 'hos_hap'`。脚本会在末尾显式打印
   "未签名 HAP 不可安装，本轮不能宣称验收通过"。
