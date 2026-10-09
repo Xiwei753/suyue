@@ -35,6 +35,14 @@ export function IncomingBookReceiver(onStatus, sendToPhone) {
   };
   const transfers = {};   // transferId → state
 
+  // 当前在途 transferId（单本互斥，P0-2）。
+  function activeTransferId() {
+    for (const id in transfers) {
+      if (transfers[id]) return id;
+    }
+    return '';
+  }
+
   function result(transferId, bookId, ok, reason) {
     const message = {
       v: 0, type: 'RESULT', transferId: transferId,
@@ -62,9 +70,16 @@ export function IncomingBookReceiver(onStatus, sendToPhone) {
     if (message.v !== 0) return notify('协议版本不支持');
     switch (message.type) {
       case 'BOOK_META': {
-        const started = beginTransfer(message);
+        // 单本互斥：第二个不同 transferId 的
+        // META 返回 E_BUSY，不得按错误元信息
+        // 校验/登记（P0-2）。相同 id 视为重启，
+        // 状态整份替换。
+        const started = beginTransfer(message,
+          activeTransferId());
         if (!started.ok) {
-          cleanup(message.transferId);
+          if (started.reason !== 'E_BUSY') {
+            cleanup(message.transferId);
+          }
           return result(message.transferId, message.bookId,
             false, started.reason);
         }

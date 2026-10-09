@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
-# Verify a built HAP artifact (施工单 P1-8)：
+# Verify a built HAP artifact (施工单 P1-8 / 第二轮 P1-6)：
 #   - HAP 容器：必须是 ZIP（PK 魔数），
 #     且包含模块清单（modules.json /
 #     config.json）；
@@ -9,21 +9,29 @@
 #     phone）；
 #   - buildMode 与文件名匹配：release
 #     不得验到 debug 或旧产物；
+#   - 可选：Manifest 中必须出现期望指纹，
+#     且不得残留占位符；
 #   - 非零字节，报告大小与 SHA-256。
-# 任何一项不满足即失败，不报告成功。
+#
+# 注意：本脚本只做**容器/清单级**检查，
+# 不做证书签名验证。签名验证必须由官方
+# hap-sign-tool 在真实工具链上完成
+# （workflow 中的 verify-signature 步骤）。
 set -euo pipefail
 
-HAP="${1:?usage: build_artifact_check.sh <path-to.hap> [--bundle ID] [--device TYPE] [--mode debug|release]}"
+HAP="${1:?usage: build_artifact_check.sh <path-to.hap> [--bundle ID] [--device TYPE] [--mode debug|release] [--expect-fingerprint VALUE]}"
 shift || true
 
 BUNDLE=""
 DEVICE=""
 MODE=""
+EXPECT_FINGERPRINT=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --bundle) BUNDLE="${2:?--bundle needs a value}"; shift 2 ;;
     --device) DEVICE="${2:?--device needs a value}"; shift 2 ;;
     --mode) MODE="${2:?--mode needs a value}"; shift 2 ;;
+    --expect-fingerprint) EXPECT_FINGERPRINT="${2:?--expect-fingerprint needs a value}"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -111,5 +119,18 @@ if [ -n "$MODE" ]; then
   esac
 fi
 
+# 6) Manifest 指纹注入校验（手表侧）：
+#    期望指纹必须出现，占位符必须消失。
+if [ -n "$EXPECT_FINGERPRINT" ]; then
+  if printf '%s' "$MANIFEST_TEXT" | grep -q 'CONFIGURE_WITH_SIGNED_PHONE_FINGERPRINT'; then
+    echo "FAIL: HAP manifest still contains the fingerprint placeholder: $HAP" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$MANIFEST_TEXT" | grep -qF "$EXPECT_FINGERPRINT"; then
+    echo "FAIL: HAP manifest does not contain the injected fingerprint: $HAP" >&2
+    exit 1
+  fi
+fi
+
 SHA="$(sha256sum "$HAP" | awk '{print $1}')"
-echo "HAP_OK path=$HAP manifest=$MANIFEST size=$SIZE mode=${MODE:-unknown} sha256=$SHA"
+echo "HAP_OK path=$HAP manifest=$MANIFEST size=$SIZE mode=${MODE:-unknown} sha256=$SHA note=container-and-manifest-check-only"

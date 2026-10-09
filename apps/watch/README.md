@@ -37,11 +37,11 @@
 - 表冠翻页（待确认 GT4 Lite SDK 能力；不支持则触屏翻页，不伪造“已支持”）。
 - 圆屏真实像素分页（当前为估算字宽，待 GT4 46mm 真机校准）。
 - 在 GT 4 46mm 上编译、签名、安装、验证文件/通信接口。现在只是有对应的源文件，不能称为真机适配通过。
-- 迁移收尾：设备验证成功后删除 `storage/BookFiles.js` 与 `pages/index` 的演示书桥接（施工单要求，不能一刀切删）。
+- 迁移收尾：演示书桥接已删除（`storage/BookFiles.js` 已移除；空书库不再自动重造测试书，只在旧 `demo.txt` 真实存在时迁移）。仍待真机验证迁移路径本身。
 
 ## 引用及许可证
 
-代码基于三个 [Lite Wearable MIT 示例](../../docs/REFERENCES.md) 所介绍的接口与处理方式改造；`BookFiles.js`、`WearReceiver.js` 保留了来源声明。完整 MIT 条款及原作者声明放在 [third_party/NOTICE.md](../../third_party/NOTICE.md) 和相应许可文件中。华为 SDK wrapper 的第三方实现没有打包进来。
+代码基于三个 [Lite Wearable MIT 示例](../../docs/REFERENCES.md) 所介绍的接口与处理方式改造；`WearReceiver.js` 保留了来源声明。完整 MIT 条款及原作者声明放在 [third_party/NOTICE.md](../../third_party/NOTICE.md) 和相应许可文件中。华为 SDK wrapper 的第三方实现没有打包进来。
 
 ## 开发提示
 

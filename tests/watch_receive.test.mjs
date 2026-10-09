@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Run: node --experimental-default-type=module tests/watch_receive.test.mjs
+// Run: node tests/watch_receive.test.mjs
 // 手表端接收闭环测试（施工单 P0-5/P0-6/P1-11/P1-12）：
 //   - 文件通道：BOOK_META → receiveFileChannel
 //     （复制 → 大小校验 → 流式 SHA-256 → 原子入库）
@@ -17,146 +17,16 @@ import { readFileSync, writeFileSync, mkdirSync,
   mkdtempSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { writeSystemFileStub } from './helpers/system_file_stub.mjs';
+import { createWatchLoader, wait }
+  from './helpers/watch_module_loader.mjs';
 
 const tmp = mkdtempSync(join(tmpdir(), 'suyue-rcv-'));
 const sandbox = mkdtempSync(join(tmpdir(), 'suyue-fs-'));
-
-// @system.file 桩：internal://app/<p> → sandbox/<p>。
-const stubPath = join(tmp, 'system_file_stub.mjs');
-writeFileSync(stubPath, `
-import { mkdirSync, readFileSync, writeFileSync,
-  copyFileSync, renameSync, rmSync, statSync,
-  accessSync } from 'node:fs';
-import { dirname } from 'node:path';
-const ROOT = ${JSON.stringify(sandbox)};
-const resolve = (uri) => {
-  if (typeof uri !== 'string' ||
-      !uri.startsWith('internal://app/')) {
-    throw new Error('unexpected uri: ' + uri);
-  }
-  return ROOT + '/' + uri.slice('internal://app/'.length);
-};
-const ok = (cb) => cb && cb();
-const fail = (cb, code) => cb && cb({}, code || 301);
-export default {
-  access(o) {
-    try { accessSync(resolve(o.uri)); ok(o.success); }
-    catch (e) { fail(o.fail); }
-  },
-  mkdir(o) {
-    try { mkdirSync(resolve(o.uri),
-      { recursive: !!o.recursive }); ok(o.success); }
-    catch (e) { fail(o.fail, -1); }
-  },
-  readText(o) {
-    try {
-      const buf = readFileSync(resolve(o.uri));
-      const start = o.position || 0;
-      const len = Math.min(o.length || 4096,
-        buf.length - start);
-      const text = buf.toString('utf8',
-        start, start + len);
-      o.success && o.success({ text });
-    } catch (e) { fail(o.fail); }
-  },
-  writeText(o) {
-    try {
-      const p = resolve(o.uri);
-      mkdirSync(dirname(p), { recursive: true });
-      writeFileSync(p, o.text, o.append ? 'utf8' : undefined);
-      ok(o.success);
-    } catch (e) { fail(o.fail, -1); }
-  },
-  readArrayBuffer(o) {
-    try {
-      const buf = readFileSync(resolve(o.uri));
-      const start = o.position || 0;
-      const len = Math.min(o.length || (buf.length - start),
-        buf.length - start);
-      const slice = buf.subarray(start, start + len);
-      const ab = new ArrayBuffer(slice.length);
-      new Uint8Array(ab).set(slice);
-      o.success && o.success({ buffer: ab });
-    } catch (e) { fail(o.fail); }
-  },
-  writeArrayBuffer(o) {
-    try {
-      const p = resolve(o.uri);
-      mkdirSync(dirname(p), { recursive: true });
-      const bytes = Buffer.from(o.buffer);
-      if (o.append) {
-        const existing = existsSync(p) ?
-          readFileSync(p) : Buffer.alloc(0);
-        writeFileSync(p, Buffer.concat([existing, bytes]));
-      } else {
-        writeFileSync(p, bytes);
-      }
-      ok(o.success);
-    } catch (e) { fail(o.fail, -1); }
-  },
-  copy(o) {
-    try {
-      const dst = resolve(o.dstUri);
-      mkdirSync(dirname(dst), { recursive: true });
-      copyFileSync(resolve(o.srcUri), dst);
-      ok(o.success);
-    } catch (e) { fail(o.fail, -1); }
-  },
-  move(o) {
-    try {
-      const dst = resolve(o.dstUri);
-      mkdirSync(dirname(dst), { recursive: true });
-      renameSync(resolve(o.srcUri), dst);
-      ok(o.success);
-    } catch (e) { fail(o.fail, -1); }
-  },
-  delete(o) {
-    try { rmSync(resolve(o.uri)); ok(o.success); }
-    catch (e) { fail(o.fail, -1); }
-  },
-  get(o) {
-    try {
-      const st = statSync(resolve(o.uri));
-      o.success && o.success({ uri: o.uri,
-        length: st.size,
-        lastModifiedTime: st.mtimeMs,
-        type: st.isDirectory() ? 'directory' : 'file' });
-    } catch (e) { fail(o.fail); }
-  }
-};
-`);
-
-// 递归加载手表 JS 模块：相对 import 改写为绝对
-// 路径，@system.file 改写为上面的桩。
-const loaded = new Map();
-const load = async (rel) => {
-  if (loaded.has(rel)) return loaded.get(rel);
-  const srcPath = join('apps/watch/entry/src/main/js/MainAbility', rel);
-  let src = readFileSync(srcPath, 'utf8');
-  const importRe = /from\s+'([^']+)'/g;
-  let m;
-  const deps = [];
-  while ((m = importRe.exec(src)) !== null) {
-    const spec = m[1];
-    if (spec.startsWith('.')) {
-      const depPath = join(rel, '..', spec);
-      const depModule = await load(depPath);
-      const depTmp = join(tmp, depPath.replaceAll('/', '_') + '.mjs');
-      deps.push({ spec, depTmp, depModule });
-    } else if (spec === '@system.file') {
-      deps.push({ spec, depTmp: stubPath, depModule: null });
-    }
-  }
-  const modPath = join(tmp, rel.replaceAll('/', '_') + '.mjs');
-  for (const dep of deps) {
-    src = src.replace("from '" + dep.spec + "'",
-      "from '" + dep.depTmp + "'");
-  }
-  writeFileSync(modPath, src);
-  const mod = await import(modPath);
-  loaded.set(rel, mod);
-  return mod;
-};
+// @system.file 桩：internal://app/<p> → sandbox/<p>
+// （共享实现见 tests/helpers/system_file_stub.mjs）。
+const stubPath = writeSystemFileStub(tmp, sandbox);
+const load = createWatchLoader({ tmpDir: tmp, stubPath });
 
 const BookStorage = await load('storage/BookStorage.js');
 const LibraryIndex = await load('storage/LibraryIndex.js');
@@ -167,9 +37,6 @@ const { sha256Bytes } = await load('util/Sha256.js');
 const enc = new TextEncoder();
 const sha256 = (bytes) =>
   createHash('sha256').update(bytes).digest('hex');
-
-// ---- 工具：等待回调式 API 完成 ----
-const wait = (fn) => new Promise((resolve) => fn(resolve));
 
 const writeReceived = (name, bytes) => {
   const p = join(sandbox, name);

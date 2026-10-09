@@ -7,10 +7,14 @@ name: Watch Lite HAP build (self-hosted DevEco required)
 #   storeFileB64/certpathB64/profileB64: base64 编码的签名文件
 #   keyAlias/keyPassword/storePassword: 口令
 #   signAlg: 默认 SHA256withECDSA
-#   fingerprints: {"phone": 64位hex, "watch": 64位hex}
-#   —— 手机证书指纹注入手表侧 PhonePeerConfig.g.js，
-#     用于门控消息来源。材料只在构建生命周期内
-#     存在，结束步骤（if: always()）统一清理。
+#   fingerprints: {"phone": <手机证书指纹>, "watch": <手表证书指纹>}
+#   —— 手机指纹同时注入：
+#      (a) 手表 JS PhonePeerConfig.g.js（消息来源门控）；
+#      (b) 手表 Manifest config.json 的 supportLists（系统级授权接收）。
+#      两处必须一致，构建后从 HAP 内清单再验证一次。
+#
+# 指纹格式：以 GT4 Lite SDK 实测为准（P1-9）。
+# 确认为 64 位 hex 时设置 repo variable WATCH_FINGERPRINT_FORMAT=hex64。
 on:
   push:
     branches: [auto-issue-1, main]
@@ -43,6 +47,7 @@ jobs:
         # 不在本 step 末尾删除（旧实现的 trap
         # 会在本 step 结束时删掉材料，导致
         # 构建 step 读不到——施工单 P1-7）。
+        # Manifest supportLists 同步注入（P0-1）。
         env:
           WATCH_SIGNING_MATERIAL: ${{ secrets.WATCH_SIGNING_MATERIAL }}
         run: |
@@ -52,7 +57,10 @@ jobs:
             --build-profile apps/watch/build-profile.json5 \
             --identity-file apps/watch/entry/src/main/js/MainAbility/wear/PhonePeerConfig.g.js \
             --identity-var INJECTED_PHONE_FINGERPRINT \
-            --fingerprint-key phone
+            --fingerprint-key phone \
+            --fingerprint-format "${{ vars.WATCH_FINGERPRINT_FORMAT || 'raw' }}" \
+            --manifest apps/watch/entry/src/main/config.json \
+            --manifest-peer-bundle com.xiwei753.gt4reader.phone
 
       - name: Build Lite Wearable HAP
         run: tools/build_watch_lite.sh release
@@ -70,6 +78,44 @@ jobs:
           echo "size=$(stat -c%s "$HAP")" >> "$GITHUB_OUTPUT"
           echo "sha256=$(sha256sum "$HAP" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
+      - name: Verify manifest fingerprint inside the HAP
+        # 不能把「JS 里有指纹」当「手表已授权接收」：
+        # 从打包后的清单再验证 supportLists（P0-1）。
+        env:
+          WATCH_SIGNING_MATERIAL: ${{ secrets.WATCH_SIGNING_MATERIAL }}
+        run: |
+          PHONE_FP="$(printf '%s' "$WATCH_SIGNING_MATERIAL" | python3 -c \
+            'import json,sys; print(json.load(sys.stdin)["fingerprints"]["phone"])')"
+          tests/build_artifact_check.sh "${{ steps.hap.outputs.path }}" \
+            --bundle com.xiwei753.gt4reader.watch \
+            --device liteWearable \
+            --mode release \
+            --expect-fingerprint "$PHONE_FP"
+
+      - name: Verify HAP signature with hap-sign-tool
+        # 证书签名验证：本步失败即失败，不能用
+        # 「ZIP/清单检查」代替（P1-6）。
+        env:
+          HAP_SIGN_TOOL_JAR: ${{ vars.HAP_SIGN_TOOL_JAR }}
+        run: |
+          TOOL="$HAP_SIGN_TOOL_JAR"
+          if [ -z "$TOOL" ]; then
+            for candidate in \
+              "$HOME/command-line-tools/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar" \
+              /opt/deveco/toolchains/lib/hap-sign-tool.jar; do
+              [ -f "$candidate" ] && TOOL="$candidate" && break
+            done
+          fi
+          if [ -z "$TOOL" ] || [ ! -f "$TOOL" ]; then
+            echo "ERROR: hap-sign-tool.jar 不可用（设置 repo variable HAP_SIGN_TOOL_JAR）。" >&2
+            echo "未做证书签名验证的构建不能标记为成功。" >&2
+            exit 1
+          fi
+          java -jar "$TOOL" verify-app \
+            -inFile "${{ steps.hap.outputs.path }}" \
+            -outCertChain "$RUNNER_TEMP/verify.cer" \
+            -outProfile "$RUNNER_TEMP/verify.p7b"
+
       - name: Report artifact identity
         run: |
           echo "HAP name: ${{ steps.hap.outputs.name }}"
@@ -84,11 +130,12 @@ jobs:
           if-no-files-found: error
 
       - name: Remove signing material and restore configs
-        # 无论构建成败都执行：签名材料
-        # 不得残留在工作区（施工单 P1-7）。
+        # 无论构建成败都执行：签名材料与注入的
+        # Manifest 指纹不得残留在工作区（P1-7/P0-1）。
         if: always()
         run: |
           rm -rf "$RUNNER_TEMP/suyue-signing"
           git checkout -- apps/watch/build-profile.json5 \
-            apps/watch/entry/src/main/js/MainAbility/wear/PhonePeerConfig.g.js
+            apps/watch/entry/src/main/js/MainAbility/wear/PhonePeerConfig.g.js \
+            apps/watch/entry/src/main/config.json
           echo "signing material removed; configs restored"

@@ -2,14 +2,16 @@
 // 多书索引：books.json。只有文件真实存在且校验通过的
 // 书籍才对用户可见；索引与文件不一致时以文件为准清理。
 //
-// 可靠性（施工单 P1-12）：
-//   - 原子写：books.json.tmp → move 覆盖，
-//     不直接覆盖写 books.json；
-//   - 写操作串行化：并发 addBook/removeBook
-//     不再互相覆盖；
-//   - 回滚：写失败时恢复最近一次成功写入
-//     的索引内容；新增书籍写索引失败时
-//     删除孤儿书籍文件。
+// 可靠性（施工单 P1-12 / 第二轮 P0-4）：
+//   - 原子写：books.json.tmp → move 覆盖正式文件；
+//     move 对已存在目标的行为不假设可覆盖：
+//     先尝试 move，失败则删除目标后再 move 一次；
+//   - 写操作串行化：并发 addBook/removeBook 与
+//     listBooks 的清理周期都经同一队列；
+//   - 快照不可变：lastGood 保存深拷贝，写入
+//     期间绝不原地修改快照（否则回滚会写回
+//     刚失败的脏数据）；
+//   - 回滚后回读磁盘校验，失败如实上报。
 import file from '@system.file';
 import { INDEX_FILE, bookPath, isSafeBookId,
   complete, deleteFile } from './BookStorage.js';
@@ -17,7 +19,8 @@ import { INDEX_FILE, bookPath, isSafeBookId,
 var INDEX_TMP = INDEX_FILE + '.tmp';
 var queue = [];
 var running = false;
-// 最近一次成功写入的索引内容。
+// 最近一次成功写入的索引内容（深拷贝快照，
+// 任何写路径都不得修改其元素）。
 var lastGood = [];
 
 function parseEntries(text) {
@@ -31,6 +34,16 @@ function parseEntries(text) {
   }
 }
 
+// 深拷贝：元素必须复制，不能与调用方
+// 后续修改共享引用。
+function snapshot(entries) {
+  const out = [];
+  for (var i = 0; i < entries.length; i++) {
+    out.push(Object.assign({}, entries[i]));
+  }
+  return out;
+}
+
 export function loadIndex(cb) {
   file.readText({
     uri: INDEX_FILE,
@@ -38,29 +51,46 @@ export function loadIndex(cb) {
     position: 0,
     success: (data) => {
       const entries = parseEntries(data.text);
-      lastGood = entries;
-      complete(cb, entries);
+      lastGood = snapshot(entries);
+      complete(cb, snapshot(entries));
     },
     fail: () => complete(cb, [])
   });
 }
 
-// 原子写：tmp → move。
+// 把 tmp 提交为正式索引：不假设 move 可以
+// 覆盖已存在的目标文件。
+function commitIndexTmp(cb) {
+  file.move({
+    srcUri: INDEX_TMP,
+    dstUri: INDEX_FILE,
+    success: () => complete(cb, { ok: true }),
+    fail: () => {
+      // 目标可能已存在且不可覆盖：删除后重试。
+      deleteFile(INDEX_FILE, () => {
+        file.move({
+          srcUri: INDEX_TMP,
+          dstUri: INDEX_FILE,
+          success: () => complete(cb, { ok: true }),
+          fail: (data, code) => complete(cb,
+            { ok: false, reason: 'index_move',
+              code: code })
+        });
+      });
+    }
+  });
+}
+
 function saveIndexAtomic(entries, cb) {
   file.writeText({
     uri: INDEX_TMP,
     text: JSON.stringify(entries),
     append: false,
     success: () => {
-      file.move({
-        srcUri: INDEX_TMP,
-        dstUri: INDEX_FILE,
-        success: () => {
-          lastGood = entries;
-          complete(cb, { ok: true });
-        },
-        fail: (data, code) => complete(cb,
-          { ok: false, reason: 'index_move', code: code })
+      commitIndexTmp((state) => {
+        if (!state.ok) return complete(cb, state);
+        lastGood = snapshot(entries);
+        complete(cb, { ok: true });
       });
     },
     fail: (data, code) => complete(cb,
@@ -68,8 +98,8 @@ function saveIndexAtomic(entries, cb) {
   });
 }
 
-// 写操作串行化：同一时刻只有一个
-// 索引写在进行。
+// 写操作串行化：同一时刻只有一个索引
+// 读改写周期在进行。
 function enqueue(task) {
   queue.push(task);
   if (!running) runNext();
@@ -85,54 +115,80 @@ function runNext() {
   task(() => runNext());
 }
 
-// 写失败回滚：恢复上一份成功写入的
-// 索引；若指定了孤儿书籍文件则删除。
-function rollback(newEntry, cb) {
-  saveIndexAtomic(lastGood, () => {
-    if (newEntry && isSafeBookId(newEntry.bookId)) {
-      deleteFile(bookPath(newEntry.bookId),
-        () => complete(cb,
-          { ok: false, reason: 'index_rolled_back' }));
-    } else {
-      complete(cb, { ok: false,
-        reason: 'index_rolled_back' });
+// 写失败回滚：把最近一次成功的快照写回，
+// 回读校验；新增失败时删除孤儿书籍文件。
+// 回调结果表达**回滚本身**是否成功：
+//   { restored: true } 或
+//   { restored: false, reason: E_ROLLBACK_* }
+function rollback(orphanEntry, cb) {
+  const restore = snapshot(lastGood);
+  saveIndexAtomic(restore, (state) => {
+    if (!state.ok) {
+      return complete(cb, { restored: false,
+        reason: 'E_ROLLBACK_FAILED' });
     }
+    // 回读校验：磁盘内容必须等于快照。
+    file.readText({
+      uri: INDEX_FILE,
+      length: 65536,
+      position: 0,
+      success: (data) => {
+        const onDisk = parseEntries(data.text);
+        if (JSON.stringify(onDisk) !==
+            JSON.stringify(restore)) {
+          return complete(cb, { restored: false,
+            reason: 'E_ROLLBACK_MISMATCH' });
+        }
+        finishRollback(orphanEntry, cb);
+      },
+      fail: () => complete(cb, { restored: false,
+        reason: 'E_ROLLBACK_FAILED' })
+    });
   });
 }
 
+function finishRollback(orphanEntry, cb) {
+  if (orphanEntry && isSafeBookId(orphanEntry.bookId)) {
+    deleteFile(bookPath(orphanEntry.bookId), () => {
+      complete(cb, { restored: true });
+    });
+  } else {
+    complete(cb, { restored: true });
+  }
+}
+
 export function listBooks(cb) {
-  loadIndex((entries) => {
-    // 逐本确认文件存在；不存在的条目从索引清除。
-    let pending = entries.length;
-    const alive = [];
-    if (pending === 0) return complete(cb, []);
-    entries.forEach((entry) => {
-      file.access({
-        uri: bookPath(entry.bookId),
-        success: () => {
-          alive.push(entry);
-          if (--pending === 0) {
-            if (alive.length === entries.length) {
-              return complete(cb, alive);
-            }
-            enqueue((done) => {
-              saveIndexAtomic(alive, () => {
-                done();
-                complete(cb, alive);
-              });
-            });
-          }
-        },
-        fail: () => {
-          if (--pending === 0) {
-            enqueue((done) => {
-              saveIndexAtomic(alive, () => {
-                done();
-                complete(cb, alive);
-              });
-            });
-          }
+  // 读-检-清理整周期入队，与写操作互斥，
+  // 避免并发清理覆盖刚写入的条目（P0-4）。
+  enqueue((done) => {
+    loadIndex((entries) => {
+      let pending = entries.length;
+      const alive = [];
+      if (pending === 0) {
+        done();
+        return complete(cb, []);
+      }
+      const settleIfDone = () => {
+        if (--pending > 0) return;
+        const result = snapshot(alive);
+        if (alive.length === entries.length) {
+          done();
+          return complete(cb, result);
         }
+        saveIndexAtomic(result, () => {
+          done();
+          complete(cb, result);
+        });
+      };
+      entries.forEach((entry) => {
+        file.access({
+          uri: bookPath(entry.bookId),
+          success: () => {
+            alive.push(entry);
+            settleIfDone();
+          },
+          fail: () => settleIfDone()
+        });
       });
     });
   });
@@ -153,28 +209,27 @@ export function getBook(bookId, cb) {
 
 // 重复发送同一书籍（同 bookId）时不覆盖阅读进度：
 // 只更新元信息，保留 addedAt。
+// 注意：构造**新数组**，不原地修改读到的
+// entries，更不触碰快照（P0-4）。
 export function addBook(entry, cb) {
   enqueue((done) => {
     loadIndex((entries) => {
-      const idx = entries.findIndex((e) => e.bookId === entry.bookId);
+      const idx = entries.findIndex(
+        (e) => e.bookId === entry.bookId);
       const isNew = idx < 0;
-      if (!isNew) {
-        const previous = entries[idx];
-        entries[idx] = Object.assign({}, entry, {
-          addedAt: previous.addedAt
-        });
-      } else {
-        entries.push(Object.assign({}, entry, {
-          addedAt: Date.now()
-        }));
-      }
-      saveIndexAtomic(entries, (state) => {
+      const next = isNew ?
+        entries.concat([Object.assign({}, entry,
+          { addedAt: Date.now() })]) :
+        entries.map((e, i) => i === idx ?
+          Object.assign({}, entry,
+            { addedAt: e.addedAt }) : e);
+      saveIndexAtomic(next, (state) => {
         if (!state.ok) {
-          // 新增失败 → 回滚索引并删除孤儿
-          // 书籍文件；更新失败 → 回滚索引。
-          rollback(isNew ? entry : null, () => {
+          rollback(isNew ? entry : null, (rolled) => {
             done();
-            complete(cb, state);
+            complete(cb, rolled.restored ? state :
+              Object.assign({}, state,
+                { rollback: rolled.reason }));
           });
           return;
         }
@@ -189,11 +244,17 @@ export function removeBook(bookId, cb) {
   enqueue((done) => {
     loadIndex((entries) => {
       const kept = entries.filter((e) => e.bookId !== bookId);
+      if (kept.length === entries.length) {
+        done();
+        return complete(cb, { ok: true });
+      }
       saveIndexAtomic(kept, (state) => {
         if (!state.ok) {
-          rollback(null, () => {
+          rollback(null, (rolled) => {
             done();
-            complete(cb, state);
+            complete(cb, rolled.restored ? state :
+              Object.assign({}, state,
+                { rollback: rolled.reason }));
           });
           return;
         }

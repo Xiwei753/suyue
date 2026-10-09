@@ -55,6 +55,55 @@
 | 5 | 手机 Wear Engine 发送 | 源码完成（API 形状按华为示例）；真机互通待验证 |
 | 6 | 圆屏阅读体验 | 源码完成；分页回归扩展通过；表冠明确不支持（待 SDK 核对） |
 | 复核轮 | issue #1 第二轮施工单修复 | 源码完成；新增 tests/watch_receive.test.mjs 端到端互验；真机/HAP 仍待验证 |
+| 复核轮 2 | issue #1 第三轮施工单修复 | 源码完成；新增 waiter/索引/注入三类失败回归；HAP 与真机仍阻断 |
+
+### 第三轮修复明细（第二轮复核施工单）
+
+**P0**
+1. **Manifest 授权指纹**：`apps/watch/entry/src/main/config.json`
+   的 `supportLists` 构建期由 `tools/inject_signing.py`
+   注入真实手机证书指纹（占位符缺失即 fail）；workflow
+   构建后从 HAP 内清单再验证一次（`--expect-fingerprint`），
+   清理步骤 `git checkout` 还原 config.json。只改 JS 不算
+   系统级授权。
+2. **文件与 BOOK_META 关联**：`WearReceiver.js` 的
+   `extractFileRef` 逐字段探测（`file`/`name`/`uri`/
+   `filePath`）并记录命中字段，缺字段不落盘；手表侧
+   单本互斥（第二个不同 transferId 回 `E_BUSY`，同 id
+   重发视为重启）；手机侧 `sendBook` 同样拒绝并发。
+3. **RESULT waiter 生命周期**：新增纯逻辑
+   `services/TransferWaiters.js`（Node 可测），每轮重试
+   重新注册 waiter，上传超时与回执超时分离
+   （`UPLOAD_TIMEOUT_MS` / `RESULT_TIMEOUT_MS`），所有
+   异常/取消/超时统一清理计时器；迟到回执入缓存。
+4. **索引回滚别名 Bug**：`LibraryIndex.js` 的快照改为
+   深拷贝，写入构造新数组不原地修改；提交不假设
+   `move` 可覆盖（失败则删除目标重试）；回滚后回读
+   磁盘校验，失败上报 `E_ROLLBACK_*`。
+
+**P1**
+5. 演示书生成器（`storage/BookFiles.js`）已删除；空书库
+   不再自动重造，只在旧 `demo.txt` 真实存在时迁移；迁移
+   摘要读取失败时不写空摘要、不登记。
+6. `tests/build_artifact_check.sh` 明确标注只做容器/清单
+   检查、**不做证书签名验证**；两个 workflow 新增
+   `hap-sign-tool verify-app` 验签步骤（工具缺失即失败）。
+7. 取消接通真实 SDK：`cancelFileTransfer(deviceRandomId,
+   appParam, P2pFile)`（以华为指南为准，待真机验证）+
+   向手表发 `ERROR code=E_CANCELLED`；手机界面新增
+   「取消发送」按钮，取消后不得入库。
+8. 大文件内存：保留 32 MiB 导入上限、文件通道流式
+   校验；**SDK 回调签名与真机行为仍待实测**。
+9. 指纹格式不再被无依据地限制为 64 位 hex：默认只做
+   结构校验（`.fail` 分隔符/空白），确认为 hex 时用
+   `--fingerprint-format hex64`；实际格式以 GT4 Lite
+   SDK 实测为准。
+
+**仍阻断真机验收的环境**：自托管 `hmos-deveco` runner、
+`WATCH_SIGNING_MATERIAL`/`PHONE_SIGNING_MATERIAL`
+Secrets（含双端证书指纹与 `hap-sign-tool` 路径）、
+GT 4 46mm 与 Pocket 2 真机、Wear Engine 文件通道回调
+字段名（`data.file` vs `data.name`）与指纹格式真机核对。
 
 ### 第二轮修复明细（issue #1 复核施工单）
 
@@ -122,8 +171,11 @@ Secrets、GT 4 46mm 与 Pocket 2 真机、Wear Engine
 
 - `apps/watch/build-profile.json5` 暂时采用轻智能手表示例的 `6.1.1(24)` 模板数值，但**没有确认为 GT 4 开发安装实际可用的版本**。
 - HML 页面的几何大小和字号尚未经真机校准；UTF-8 分页是估算字宽，不是字体像素测量。
-- `wear/WearReceiver.js` 的手机指纹经 CI 注入（`PhonePeerConfig.g.js`），未注入时停用消息接收；`wearengine.sendMsg` 的参数形状以华为 Lite 示例为准，**待真机验证**。
-- 手表文件通道依赖 Wear Engine 回调给出的文件路径字段（实现按示例取 `data.file`），**字段名待真机核对**。
+- `wear/WearReceiver.js` 的手机指纹经 CI 注入（`PhonePeerConfig.g.js`），未注入时停用消息接收；**系统级授权还需要 `config.json` 的 `supportLists` 同步注入**（workflow 已做，构建后从 HAP 内清单复验）。`wearengine.sendMsg` 的参数形状以华为 Lite 示例为准，**待真机验证**。
+- 手表文件通道依赖 Wear Engine 回调给出的文件路径字段：实现按 `file`/`name`/`uri`/`filePath` 逐字段探测并记录来源，**字段名待真机核对**。
+- 手表单本在途互斥（`E_BUSY`）：并发传书会被拒绝，手机侧同样限制并发发送。
+- 证书指纹格式（hex / 编码字符串）以 GT4 Lite SDK 实测为准；当前注入脚本默认宽松校验，可用 `--fingerprint-format hex64` 收紧。
+- `tests/build_artifact_check.sh` 只做容器/清单级检查，**不构成证书签名验证**；验签由 workflow 的 `hap-sign-tool verify-app` 步骤负责（需要真实工具链）。
 - 目前只有 Node 测试（`tests/`）。Node 通过不代表 Lite JS 编译器/ArkTS 编译器通过，也不代表 Wear Engine 真机互通。
 - 两套应用包名保留历史命名，以避免与签名注册和传输配置脱节。
 

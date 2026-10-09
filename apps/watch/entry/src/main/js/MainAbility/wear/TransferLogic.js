@@ -44,9 +44,17 @@ export function validateBookMeta(meta) {
   return { ok: true };
 }
 
-export function beginTransfer(meta) {
+// 单本在途约束（第二轮 P0-2）：同一时刻只允许
+// 一个 transferId 处于接收中；第二个不同 id 的
+// BOOK_META 一律 E_BUSY。相同 id 视为重启（幂等
+// 重发 META），由调用方替换状态。
+export function beginTransfer(meta, activeTransferId) {
   const valid = validateBookMeta(meta);
   if (!valid.ok) return { ok: false, reason: valid.reason };
+  if (activeTransferId &&
+      activeTransferId !== meta.transferId) {
+    return { ok: false, reason: 'E_BUSY' };
+  }
   return {
     ok: true,
     state: {

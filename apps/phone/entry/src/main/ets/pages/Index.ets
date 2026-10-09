@@ -42,6 +42,8 @@ struct Index {
   @State private deviceStatus: string = '未发现已连接的 GT 4';
   @State private transferText: string = '未开始传输';
   @State private sending: boolean = false;
+  // 当前在途 transferId（取消时用，P1-7）。
+  @State private activeTransferId: string = '';
   private repository: BookRepository | null = null;
   private deviceService: WearDeviceService | null = null;
   private transferService: BookTransferService | null = null;
@@ -195,11 +197,15 @@ struct Index {
     }
     const device = this.devices[this.selectedDevice];
     this.sending = true;
+    this.activeTransferId = '';
     this.transferText = '正在发送《' + book.title + '》……';
     const ok = await this.transferService.sendBook(
       book, device, WATCH_PEER,
       {
         onProgress: (progress: TransferProgress) => {
+          if (progress.transferId) {
+            this.activeTransferId = progress.transferId;
+          }
           this.transferText = progress.message +
             (progress.percent > 0 &&
               progress.state === TransferState.SENDING ?
@@ -207,6 +213,7 @@ struct Index {
         }
       });
     this.sending = false;
+    this.activeTransferId = '';
     if (ok) {
       this.transferText = '《' + book.title + '》手表已确认入库';
       this.getRepository().markStatus(book.bookId,
@@ -218,6 +225,18 @@ struct Index {
         'watch did not confirm');
     }
     this.refresh();
+  }
+
+  // 取消（P1-7）：接真实 SDK cancelFileTransfer，
+  // 并通知手表清理半成品；取消后不得入库。
+  private async cancelSend(): Promise<void> {
+    const service = this.transferService;
+    if (!service || !this.activeTransferId) {
+      return;
+    }
+    this.transferText = '正在取消传输……';
+    await service.cancel(this.activeTransferId);
+    this.transferText = '已请求取消，等待手表确认清理';
   }
 
   @Builder
@@ -334,6 +353,13 @@ struct Index {
           .fontSize(13)
           .height(28)
           .onClick(() => { this.refreshDevices(); })
+        if (this.sending) {
+          Button('取消发送')
+            .fontSize(13)
+            .height(28)
+            .backgroundColor('#7f1d1d')
+            .onClick(() => { this.cancelSend(); })
+        }
         Text(this.transferText).fontSize(14)
           .fontColor(this.sending ? '#facc15' : '#a7abb4')
       }

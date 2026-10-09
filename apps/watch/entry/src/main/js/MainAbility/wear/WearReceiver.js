@@ -69,10 +69,16 @@ export function beginReceive(onStatus) {
                       subscribed = true;
                       notify('传书接收已开启');
                     } else if (data && data.isFileType) {
-                      // 文件通道到达：data.file 是
-                      // Wear Engine 送达的文件路径
-                      // （字段名以真机回调为准，待验证）。
-                      receiveFile(data.file);
+                      // 文件通道到达（P0-2）：字段名
+                      // 以 GT4 Lite SDK 实测为准。候选
+                      // 字段逐一取值，取到后记录来源；
+                      // 全部缺失则不落盘、只报状态。
+                      const ref = extractFileRef(data);
+                      if (!ref) {
+                        notify('文件通道回调缺少文件路径字段');
+                      } else {
+                        receiveFile(ref.uri, ref.field);
+                      }
                     } else if (data && typeof data.message === 'string') {
                       routeMessage(data.message);
                     }
@@ -99,20 +105,40 @@ function routeMessage(messageText) {
   receiver.onMessage(messageText);
 }
 
+// 文件通道回调字段提取（P0-2）：
+// 上游 Lite 示例在 isFileType 分支使用 data.file；
+// 部分 SDK 版本可能使用 name/uri/filePath。
+// 逐一探测，返回命中的字段名以便日志核对；
+// 不猜测、不合成路径。
+var FILE_REF_FIELDS = ['file', 'name', 'uri', 'filePath'];
+export function extractFileRef(data) {
+  if (!data) return null;
+  for (var i = 0; i < FILE_REF_FIELDS.length; i++) {
+    var field = FILE_REF_FIELDS[i];
+    var value = data[field];
+    if (typeof value === 'string' && value.length > 0) {
+      return { uri: value, field: field };
+    }
+  }
+  return null;
+}
+
 // 文件通道：把 Wear Engine 送达的文件交给
 // IncomingBookReceiver 复制 → 校验 → 入库。
 // 结果（RESULT）由接收器统一经 sendToPhone 回发。
-function receiveFile(filePath) {
+// 单本在途约束下，收到的文件唯一对应当前
+// 待传 transferId（P0-2）。
+function receiveFile(filePath, field) {
   if (!receiver || !filePath) {
     return;
   }
-  receiver.receiveFileChannel(filePath,
-    /* fileApi */ null, (outcome) => {
-      if (!outcome.ok) {
-        console.error('file channel failed: ' +
-          outcome.reason);
-      }
-    });
+  console.info('file channel ref via data.' + field);
+  receiver.receiveFileChannel(filePath, null, (outcome) => {
+    if (!outcome.ok) {
+      console.error('file channel failed: ' +
+        outcome.reason);
+    }
+  });
 }
 
 export function stopReceive() {

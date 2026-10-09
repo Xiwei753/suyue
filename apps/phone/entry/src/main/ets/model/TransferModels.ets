@@ -32,7 +32,12 @@ export interface TargetDevice {
 }
 
 export const MAX_RETRY = 3;
+// 回执超时：上传完成后等待手表 RESULT 的时间
+// （第二轮 P0-3：不再把上传时长计入）。
 export const RESULT_TIMEOUT_MS = 60000;
+// 上传超时：设备检查 + HELLO + BOOK_META +
+// 文件通道传输的总时长上限。
+export const UPLOAD_TIMEOUT_MS = 300000;
 
 // 与 shared/protocol README 的错误码表一致。
 export type TransferErrorCode =
@@ -45,6 +50,8 @@ export type TransferErrorCode =
   | 'E_DUPLICATE_TRANSFER'
   | 'E_CANCELLED'
   | 'E_PEER_UNAVAILABLE'
+  // 单本互斥：已有传输在途（第二轮 P0-2）。
+  | 'E_BUSY'
   | 'E_PROTOCOL';
 
 export function newTransferId(): string {

@@ -45,6 +45,12 @@
 - 回执接收：`p2pClient.registerMessageReceiver(
   device.randomId, appParam, callback)`，
   手表的 RESULT/ACK 经此回到手机。
+- 取消：`p2pClient.cancelFileTransfer(
+  device.randomId, appParam, P2pFile)` 返回
+  `Promise<P2pResult>`（比较
+  `P2pResultCode.COMMUNICATION_SUCCESS`）；
+  取消后向手表发送 `ERROR code=E_CANCELLED`，
+  半成品由手表清理。
 - `appParam = { remoteApp: { bundleName, fingerprint } }`，
   手机 fingerprint 必须与手表 `supportLists`
   配置一致。
@@ -53,11 +59,18 @@
 
 - 消息订阅：`wearengine.subscribeMsg`，
   `data.message` 为 JSON 控制消息；
-- 文件到达：`data.isFileType` 回调给出文件句柄，
-  读取后走整本 SHA-256 校验（字段以真机为准，
-  当前为待验证）；
-- 回执发送 API（sendMessage 类）以 Lite SDK
-  实际能力为准，当前由页面层注入发送函数。
+- 文件到达：`data.isFileType` 分支携带文件路径，
+  候选字段 `file`/`name`/`uri`/`filePath`（上游示例用
+  `data.file`，**以真机回调实测为准**）；收到后
+  复制入沙箱、按片校验整本 SHA-256 再入库；
+- 回执发送：`wearengine.sendMsg({deviceId: 'remote',
+  bundleName: <手机包名>, abilityName: '', message})`
+  （形状以上游 Lite 示例为准，待真机验证）。
+- Manifest 授权：`config.json` 的
+  `metaData.customizeData[supportLists]` 必须为
+  `<手机包名>:<手机证书指纹>`；构建期由
+  `tools/inject_signing.py` 从签名材料注入，
+  未注入时收不到消息。
 
 ## 消息 envelope
 
@@ -149,7 +162,20 @@ JSON 序列化负责书名等字段的转义，接收方不得对转义结果做
 | E_DUPLICATE_TRANSFER | 同一 transferId 重复开始且状态不一致 |
 | E_CANCELLED | 发送方取消 |
 | E_PEER_UNAVAILABLE | 对端未配对/离线/不支持 |
+| E_BUSY | 已有另一本在途：单本互斥（第二轮 P0-2） |
 | E_PROTOCOL | 协议字段缺失或协商失败 |
+
+## 单本在途（第二轮 P0-2）
+
+手表同一时刻只允许一个 `transferId` 处于接收中：
+
+- 第二个**不同** `transferId` 的 `BOOK_META`：回
+  `RESULT ok=false reason=E_BUSY`，不改变当前状态；
+- 相同 `transferId` 的重复 `BOOK_META`：视为重启，
+  整份替换接收状态（幂等重发）；
+- 文件通道到达的文件唯一对应当前在途 `transferId`；
+  无在途传输时收到文件：丢弃并回 `E_PROTOCOL`，
+  不落盘。
 
 ## 时序
 

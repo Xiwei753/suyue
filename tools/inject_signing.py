@@ -1,12 +1,25 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""CI 签名注入（施工单 P1-7）。
+"""CI 签名与身份注入（施工单 P1-7 / 第二轮 P0-1）。
 
 把 Secrets 中的签名材料（JSON：base64 编码的
 storeFile/certpath/profile + 别名/口令 + 双端
-证书指纹）落盘到构建目录，并把真实
-signingConfigs 写入 build-profile.json5，
-同时把对端证书指纹注入身份配置文件。
+证书指纹）落盘到构建目录，并把：
+
+  1. 真实 signingConfigs 写入 build-profile.json5；
+  2. 对端证书指纹写入身份配置文件
+     （手表 PhonePeerConfig.g.js / 手机
+     PeerIdentityConfig.g.ets）；
+  3. 手表 Manifest（config.json）中
+     metaData.customizeData 的 supportLists
+     占位符替换为真实手机指纹。
+
+指纹格式（第二轮 P1-9）：不同 SDK 版本的
+Wear Engine 可能要求 hex 摘要或编码后的
+指纹字符串，格式**以 GT4 Lite SDK 实测为准**。
+默认只做结构性校验（非空、不含空白/引号/
+冒号等破坏分隔符的字符）；确认为 64 位 hex
+时可用 --fingerprint-format hex64 收紧。
 
 绝不提交材料：所有写入都在工作区，
 workflow 的清理步骤（if: always()）负责
@@ -20,11 +33,55 @@ import re
 import sys
 
 HEX64 = re.compile(r'^[0-9a-f]{64}$')
+# 指纹字符串不得包含会破坏 manifest 值
+# （bundle:fingerprint）或 JS 字面量的字符。
+FORBIDDEN = re.compile(r'[\s:;,\'"\\]')
 
 
 def fail(msg):
     print('ERROR: ' + msg, file=sys.stderr)
     sys.exit(1)
+
+
+def validate_fingerprint(value, fmt, where):
+    text = str(value or '').strip()
+    if not text:
+        fail('%s 指纹为空' % where)
+    if FORBIDDEN.search(text):
+        fail('%s 指纹包含空白或分隔符，'
+             '不接受（格式以 SDK 实测为准）' % where)
+    if fmt == 'hex64' and not HEX64.match(text.lower()):
+        fail('%s 指纹不是 64 位十六进制'
+             '（--fingerprint-format hex64）' % where)
+    if fmt == 'raw' and len(text) > 256:
+        fail('%s 指纹长度异常（>256）' % where)
+    return text
+
+
+def inject_manifest(path, peer_bundle, fingerprint):
+    with open(path, 'r', encoding='utf-8') as handle:
+        manifest = json.load(handle)
+    module = manifest.get('module') or {}
+    meta = module.get('metaData') or {}
+    entries = meta.get('customizeData') or []
+    target = None
+    for entry in entries:
+        if entry.get('name') == 'supportLists':
+            target = entry
+            break
+    if target is None:
+        fail('config.json 缺少 metaData.customizeData '
+             'supportLists 条目')
+    value = str(target.get('value') or '')
+    placeholder = (peer_bundle +
+                   ':CONFIGURE_WITH_SIGNED_PHONE_FINGERPRINT')
+    if value != placeholder:
+        fail('supportLists 当前值不是预期占位符，拒绝猜测格式：'
+             + value)
+    target['value'] = peer_bundle + ':' + fingerprint
+    with open(path, 'w', encoding='utf-8') as handle:
+        json.dump(manifest, handle, ensure_ascii=False, indent=2)
+        handle.write('\n')
 
 
 def main():
@@ -42,6 +99,14 @@ def main():
     ap.add_argument('--fingerprint-key', required=True,
                     choices=['phone', 'watch'],
                     help='注入哪一个对端指纹')
+    ap.add_argument('--fingerprint-format', default='raw',
+                    choices=['raw', 'hex64'],
+                    help='指纹格式校验（默认 raw 宽松；'
+                         '确认为 64 位 hex 时用 hex64）')
+    ap.add_argument('--manifest', default='',
+                    help='手表 config.json（注入 supportLists）')
+    ap.add_argument('--manifest-peer-bundle', default='',
+                    help='supportLists 中的对端（手机）包名')
     args = ap.parse_args()
 
     try:
@@ -106,12 +171,10 @@ def main():
 
     # 对端证书指纹注入身份配置。
     fingerprints = material.get('fingerprints') or {}
-    fingerprint = str(
-        fingerprints.get(args.fingerprint_key) or ''
-    ).lower()
-    if not HEX64.match(fingerprint):
-        fail('fingerprints.%s 缺失或不是 64 位十六进制'
-             % args.fingerprint_key)
+    fingerprint = validate_fingerprint(
+        fingerprints.get(args.fingerprint_key),
+        args.fingerprint_format,
+        'fingerprints.%s' % args.fingerprint_key)
     with open(args.identity_file, 'r',
               encoding='utf-8') as handle:
         identity_text = handle.read()
@@ -128,10 +191,25 @@ def main():
               encoding='utf-8') as handle:
         handle.write(identity_text)
 
+    # 手表 Manifest：supportLists 必须与真实
+    # 手机证书指纹一致，否则手表不会授权
+    # 接收（第二轮 P0-1）。
+    if args.manifest:
+        if not args.manifest_peer_bundle:
+            fail('--manifest 需要同时提供 '
+                 '--manifest-peer-bundle')
+        inject_manifest(args.manifest,
+                        args.manifest_peer_bundle,
+                        fingerprint)
+
     print('signing material staged at %s '
-          '(content hidden); fingerprint %s injected'
+          '(content hidden); fingerprint %s injected '
+          '(format=%s)%s'
           % (args.signing_dir,
-             args.fingerprint_key))
+             args.fingerprint_key,
+             args.fingerprint_format,
+             '; supportLists updated'
+             if args.manifest else ''))
 
 
 if __name__ == '__main__':

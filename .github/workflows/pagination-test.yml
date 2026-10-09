@@ -5,6 +5,8 @@ on:
       - 'apps/watch/**'
       - 'apps/phone/**'
       - 'tests/**'
+      - 'tools/inject_signing.py'
+      - 'shared/**'
       - 'README.md'
       - 'docs/BUILD_AND_TRANSFER.md'
       - '.github/workflows/pagination-test.yml'
@@ -18,17 +20,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Check project layout
-        run: node tests/source-contract.test.mjs
-      - name: Test UTF-8 paging
-        run: node --experimental-default-type=module tests/pagination.test.mjs
-      - name: Test zip inflate / EPUB unpack guards
-        run: node --experimental-default-type=module tests/zip_inflate.test.mjs
-      - name: Test transfer protocol
-        run: node --experimental-default-type=module tests/protocol.test.mjs
-      - name: Test pure-JS SHA-256
-        run: node --experimental-default-type=module tests/sha256.test.mjs
-      - name: Test watch Utf8/Base64 utils
-        run: node --experimental-default-type=module tests/watch_utils.test.mjs
-      - name: Test watch transfer receiver logic
-        run: node --experimental-default-type=module tests/transfer_logic.test.mjs
+      # 全部源码级测试一次跑完（新增用例自动纳入，
+      # 不再逐个登记，避免与 tests/ 目录漂移）。
+      # 注意：源码检查不等于 HAP 构建，也不等于
+      # 真机互通。
+      - name: Run all source-only suites
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(tests/*.test.mjs)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no test files found" >&2
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            echo "== $f"
+            node "$f"
+          done
+          echo "all ${#files[@]} source-only suites passed"

@@ -70,6 +70,30 @@ jobs:
           echo "size=$(stat -c%s "$HAP")" >> "$GITHUB_OUTPUT"
           echo "sha256=$(sha256sum "$HAP" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
+      - name: Verify HAP signature with hap-sign-tool
+        # 证书签名验证：本步失败即失败，不能用
+        # 「ZIP/清单检查」代替（P1-6）。
+        env:
+          HAP_SIGN_TOOL_JAR: ${{ vars.HAP_SIGN_TOOL_JAR }}
+        run: |
+          TOOL="$HAP_SIGN_TOOL_JAR"
+          if [ -z "$TOOL" ]; then
+            for candidate in \
+              "$HOME/command-line-tools/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar" \
+              /opt/deveco/toolchains/lib/hap-sign-tool.jar; do
+              [ -f "$candidate" ] && TOOL="$candidate" && break
+            done
+          fi
+          if [ -z "$TOOL" ] || [ ! -f "$TOOL" ]; then
+            echo "ERROR: hap-sign-tool.jar 不可用（设置 repo variable HAP_SIGN_TOOL_JAR）。" >&2
+            echo "未做证书签名验证的构建不能标记为成功。" >&2
+            exit 1
+          fi
+          java -jar "$TOOL" verify-app \
+            -inFile "${{ steps.hap.outputs.path }}" \
+            -outCertChain "$RUNNER_TEMP/verify.cer" \
+            -outProfile "$RUNNER_TEMP/verify.p7b"
+
       - name: Report artifact identity
         run: |
           echo "HAP name: ${{ steps.hap.outputs.name }}"

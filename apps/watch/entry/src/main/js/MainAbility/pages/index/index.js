@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 书架页：读取真实书库索引，列书名；打开/删除。
-// 迁移桥接：首次启动把旧演示书（demo.txt）迁入
-// 新书库结构后，BookFiles.js 不再被页面引用。
 //
-// 迁移条件（施工单 P2-14）：仅当旧演示文件
-// 确实存在且移动成功才登记；元数据必须是
-// 真实字节数与摘要，绝不用 bytes:0/sha256:''
-// 的假元数据。用户清空书库后绝不自动重造。
+// 迁移（施工单 P2-14 / 第二轮 P1-5）：直接检查旧
+// 演示文件是否存在，存在才移动并登记，绝不在
+// 空书库时自动重造测试书（旧实现在此调用生成
+// 函数，用户删光后重开页面会再次生出演示书）。
 import router from '@system.router';
 import file from '@system.file';
-import { initializeLibrary } from '../../storage/BookFiles';
 import { ensureDirs, bookPath,
   deleteBook, fileSize, readWindow }
   from '../../storage/BookStorage';
@@ -39,9 +36,6 @@ export default {
   onDestroy() {
     stopReceive();
   },
-  // 迁移：旧演示书 → books/<bookId>.txt + 索引条目。
-  // 设备验证迁移成功后，按施工单删除 BookFiles.js
-  // 与本桥接逻辑（当前不能一刀切删）。
   prepareLibrary() {
     ensureDirs((dirs) => {
       if (!dirs.ok) {
@@ -54,19 +48,12 @@ export default {
           this.status = '本地书库就绪';
           return;
         }
-        initializeLibrary((result) => {
-          if (!result.ok) {
-            this.status = '本地文件初始化失败：' +
-              result.reason;
-            this.books = [];
-            return;
-          }
-          this.migrateDemo();
-        });
+        this.migrateDemo();
       });
     });
   },
-  // 一次性迁移：旧文件存在 + 移动成功才登记。
+  // 一次性迁移：先直接检查旧文件，存在且移动
+  // 成功才登记；不调用任何生成函数。
   migrateDemo() {
     file.access({
       uri: DEMO_PATH,
@@ -81,13 +68,14 @@ export default {
         });
       },
       fail: () => {
-        // 旧文件不存在：不重造测试书。
+        // 旧文件不存在：显示空库，不重造。
         this.status = '书库为空，等待手机传书';
+        this.books = [];
       }
     });
   },
-  // 移动成功后统计真实字节数与摘要，
-  // 再登记索引（拒绝假元数据）。
+  // 移动成功后统计真实字节数与摘要，再登记索引
+  // （拒绝假元数据）。
   describeMovedDemo() {
     const dst = bookPath(DEMO_BOOK_ID);
     fileSize(dst, (stat) => {
@@ -98,6 +86,11 @@ export default {
       const hasher = createSha256();
       this.hashAll(dst, 0, stat.size, hasher,
         (digest) => {
+          if (!digest) {
+            // 读取失败：不写空摘要，不登记。
+            this.status = '迁移后校验失败：摘要读取不完整';
+            return;
+          }
           addBook({
             bookId: DEMO_BOOK_ID,
             title: '中文阅读测试',
@@ -119,6 +112,7 @@ export default {
       total - offset);
     readWindow(uri, offset, size, (r) => {
       if (!r.ok) {
+        // 明确失败：返回空值，调用方不得写索引。
         return cb('');
       }
       hasher.update(r.bytes);

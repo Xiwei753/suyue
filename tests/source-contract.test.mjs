@@ -220,12 +220,16 @@ assert.ok(!transferService.includes(
   '} finally {\n              try {\n                fs.closeSync'),
   'transferFile must not close on every progress callback');
 
-// P1-10：RESULT waiter 在发送之前注册。
+// P1-10 / 第二轮 P0-3：RESULT waiter 在每个重试轮次
+// 重新注册，且注册先于任何发送。
 const sendBookBody = transferService.slice(
   transferService.indexOf('async sendBook'));
-assert.ok(sendBookBody.indexOf('registerWaiter') <
+assert.ok(sendBookBody.indexOf('waiters.beginAttempt') <
   sendBookBody.indexOf('sendMessage'),
   'waiter must be registered before any send');
+assert.ok(sendBookBody.indexOf('markUploaded') >
+  sendBookBody.indexOf('transferFile'),
+  'result timeout must start only after upload completes');
 
 // P1-11：流式 SHA-256 与导入上限。
 const sha256Module = read(
@@ -278,10 +282,95 @@ assert.ok(!watchIndex.includes('bytes: 0'),
 assert.ok(crownInput.includes('return false'),
   'crown must stay unsupported until SDK-verified');
 
-console.log('PASS: repo structure, watch JS routes, phone import stack and branding (static only)');
-
 // TransferLogic 源码（静态检查用）。
 function transferLogicSrc() {
   return read(
     'apps/watch/entry/src/main/js/MainAbility/wear/TransferLogic.js');
 }
+
+// ---- 第二轮复核（第三轮修复）静态检查 ----
+
+// P0-1：Manifest supportLists 必须由构建期注入，
+// 仓库里保持占位符；workflow 必须传 --manifest，
+// 且清理步骤还原 config.json。
+const watchConfigSrc = read(
+  'apps/watch/entry/src/main/config.json');
+assert.ok(watchConfigSrc.includes(
+  'com.xiwei753.gt4reader.phone:CONFIGURE_WITH_SIGNED_PHONE_FINGERPRINT'),
+  'repo keeps the supportLists placeholder for build-time injection');
+assert.ok(watchWf.includes('--manifest '),
+  'watch workflow must inject the manifest fingerprint');
+assert.ok(watchWf.includes('--manifest-peer-bundle'),
+  'watch workflow must name the peer bundle');
+assert.ok(watchWf.includes('apps/watch/entry/src/main/config.json'),
+  'watch workflow must point at the watch manifest');
+assert.ok(watchWf.includes('git checkout --') &&
+  watchWf.includes('config.json'),
+  'cleanup must restore the injected manifest');
+assert.ok(watchWf.includes('--expect-fingerprint'),
+  'built HAP manifest must be re-verified');
+assert.ok(read('tools/inject_signing.py').includes(
+  'CONFIGURE_WITH_SIGNED_PHONE_FINGERPRINT'),
+  'injector must guard the supportLists placeholder');
+
+// P0-2：文件通道必须按字段探测并记录来源，且
+// 单本互斥（E_BUSY）。
+assert.ok(watchReceiver.includes('extractFileRef'),
+  'file callback fields must be probed explicitly');
+assert.ok(!/receiveFile\(data\.file\)/.test(watchReceiver),
+  'watch must not pass an unverified data.file straight through');
+assert.ok(watchReceiver.includes('FILE_REF_FIELDS'),
+  'candidate callback fields must be enumerated');
+assert.ok(incomingReceiver.includes('activeTransferId'),
+  'receiver must track the single in-flight transfer');
+assert.ok(transferLogicSrc().includes("'E_BUSY'"),
+  'TransferLogic must define E_BUSY');
+assert.ok(read('shared/protocol/README.md').includes('E_BUSY'),
+  'protocol spec must document E_BUSY');
+
+// P0-3：waiter 纯逻辑模块 + 取消接真实 SDK。
+assert.ok(existsSync(
+  'apps/phone/entry/src/main/ets/services/TransferWaiters.js'),
+  'waiter registry module must exist');
+assert.ok(transferService.includes('createWaiterRegistry'),
+  'send service must use the waiter registry');
+assert.ok(transferService.includes('UPLOAD_TIMEOUT_MS'),
+  'upload timeout must be separate from the result timeout');
+assert.ok(transferService.includes('cancelFileTransfer'),
+  'cancel must call the real SDK cancelFileTransfer');
+assert.ok(transferService.includes("code: 'E_CANCELLED'"),
+  'cancel must notify the watch with ERROR/E_CANCELLED');
+assert.ok(phoneIndexFull.includes('cancelSend'),
+  'phone UI must expose the cancel action');
+
+// P0-4：索引快照不可变 + 提交不假设覆盖。
+assert.ok(libraryIndex.includes('function snapshot('),
+  'index must keep an immutable snapshot');
+assert.ok(!/entries\.push\(/.test(libraryIndex),
+  'index writes must not mutate the read array in place');
+assert.ok(libraryIndex.includes('commitIndexTmp'),
+  'index commit must handle non-overwriting move');
+assert.ok(libraryIndex.includes('E_ROLLBACK_MISMATCH'),
+  'rollback must verify the restored content on disk');
+
+// P1-5：演示书生成器必须移除，迁移只看真实文件。
+assert.ok(!existsSync(
+  'apps/watch/entry/src/main/js/MainAbility/storage/BookFiles.js'),
+  'demo generator must be deleted');
+assert.ok(!watchIndex.includes('initializeLibrary'),
+  'index page must not call any demo generator');
+assert.ok(watchIndex.includes("if (!digest)"),
+  'migration must abort instead of writing an empty digest');
+
+// P1-6：容器检查不得宣称验签；workflow 必须有
+// 官方 hap-sign-tool 验签步骤。
+assert.ok(artifactCheck.includes('不做证书签名验证'),
+  'artifact check must state it is not a signature check');
+assert.ok(watchWf.includes('hap-sign-tool') &&
+  phoneWf.includes('hap-sign-tool'),
+  'both workflows must verify signatures with hap-sign-tool');
+assert.ok(artifactCheck.includes('note=container-and-manifest-check-only'),
+  'artifact check output must be explicit about its scope');
+
+console.log('PASS: repo structure, watch JS routes, phone ' +
+  'import stack and branding (static only)');
