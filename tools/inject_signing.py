@@ -154,7 +154,7 @@ def main():
                 ('KEY_PASSWORD', material['keyPassword']),
                 ('STORE_PASSWORD', material['storePassword']),
             ):
-                handle.write(key + '=' + shlex.quote(str(value)) + '\\n')
+                handle.write(key + '=' + shlex.quote(str(value)) + '\n')
         os.chmod(env_path, 0o600)
     else:
         if not args.build_profile:
