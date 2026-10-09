@@ -1,6 +1,6 @@
 {
   "app": {
-    "bundleName": "com.xiwei.suyue",
+    "bundleName": "com.xiwei753.gt4reader.watch",
     "vendor": "Xiwei753",
     "version": {
       "code": 1000001,
@@ -32,7 +32,7 @@
       "customizeData": [
         {
           "name": "supportLists",
-          "value": "com.xiwei753.gt4reader.phone:CONFIGURE_WITH_SIGNED_PHONE_FINGERPRINT",
+          "value": "com.xiwei.suyue:CONFIGURE_WITH_SIGNED_PHONE_FINGERPRINT",
           "extra": ""
         }
       ]

@@ -50,7 +50,7 @@ function stage(prefix, fingerprint, options = {}) {
     '--identity-var', 'INJECTED_PHONE_FINGERPRINT',
     '--fingerprint-key', 'phone',
     '--manifest', manifest,
-    '--manifest-peer-bundle', 'com.xiwei753.gt4reader.phone'
+    '--manifest-peer-bundle', 'com.xiwei.suyue'
   ];
   if (options.format) {
     args.push('--fingerprint-format', options.format);
@@ -71,7 +71,7 @@ const { createRequire } = await import('node:module');
   const entry = manifest.module.metaData.customizeData
     .find((e) => e.name === 'supportLists');
   assert.equal(entry.value,
-    'com.xiwei753.gt4reader.phone:' + hex,
+    'com.xiwei.suyue:' + hex,
     'supportLists must carry the real phone fingerprint');
   assert.ok(!JSON.stringify(manifest).includes(
     'CONFIGURE_WITH_SIGNED_PHONE_FINGERPRINT'),
@@ -96,7 +96,7 @@ const { createRequire } = await import('node:module');
   const manifest = JSON.parse(readFileSync(s.manifest, 'utf8'));
   const entry = manifest.module.metaData.customizeData
     .find((e) => e.name === 'supportLists');
-  entry.value = 'com.xiwei753.gt4reader.phone:' + 'ff'.repeat(32);
+  entry.value = 'com.xiwei.suyue:' + 'ff'.repeat(32);
   writeFileSync(s.manifest, JSON.stringify(manifest, null, 2));
   // 还原 build-profile / identity：本用例只验证
   // Manifest 占位符守卫，其余注入前置条件保持不变。
@@ -114,7 +114,7 @@ const { createRequire } = await import('node:module');
     '--identity-var', 'INJECTED_PHONE_FINGERPRINT',
     '--fingerprint-key', 'phone',
     '--manifest', s.manifest,
-    '--manifest-peer-bundle', 'com.xiwei753.gt4reader.phone'
+    '--manifest-peer-bundle', 'com.xiwei.suyue'
   ], { encoding: 'utf8' });
   assert.notEqual(again.status, 0,
     'non-placeholder supportLists must fail the build');
@@ -148,7 +148,7 @@ const { createRequire } = await import('node:module');
   const entry = manifest.module.metaData.customizeData
     .find((e) => e.name === 'supportLists');
   assert.equal(entry.value,
-    'com.xiwei753.gt4reader.phone:b64AGF0dGVzdA==');
+    'com.xiwei.suyue:b64AGF0dGVzdA==');
 }
 
 // ---- 6. 缺指纹字段 → 失败 ----

@@ -15,8 +15,8 @@ import { INJECTED_PHONE_FINGERPRINT }
   from './PhonePeerConfig.g.js';
 
 export const PHONE_BUNDLE_NAME =
-  'com.xiwei753.gt4reader.phone';
+  'com.xiwei.suyue';
 export const PHONE_CERT_FINGERPRINT =
   INJECTED_PHONE_FINGERPRINT;
 export const WATCH_BUNDLE_NAME =
-  'com.xiwei.suyue';
+  'com.xiwei753.gt4reader.watch';

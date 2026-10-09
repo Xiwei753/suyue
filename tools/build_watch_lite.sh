@@ -121,6 +121,56 @@ if [ -n "$SIGN_P12" ] || [ -n "$SIGN_CER" ] || [ -n "$SIGN_PROFILE" ]; then
     echo "ERROR: 找不到 hap-sign-tool.jar（可用 HAP_SIGN_TOOL_JAR 指定）。" >&2
     exit 1
   fi
+
+  # 包名预检：profile 授权的包名必须等于本 HAP 的包名。
+  # 本机实测过这个坑：拿**手机**的 profile（com.xiwei.suyue）去签
+  # **手表** HAP（com.xiwei753.gt4reader.watch），hap-sign-tool 照样
+  # 报 "Sign Hap success!"——证书链有效，但设备按包名校验会拒绝安装。
+  # 所以签名前先比对，不匹配就**不签**，退回未签名并说明原因。
+  SIGN_MISMATCH=""
+  if command -v python3 >/dev/null 2>&1; then
+    PROFILE_JSON="$OUT_DIR/profile-check.json"
+    java -jar "$HAP_SIGN_TOOL" verify-profile -inFile "$SIGN_PROFILE" \
+      -outFile "$PROFILE_JSON" >/dev/null 2>&1 || true
+    PROFILE_BUNDLE=""
+    if [ -s "$PROFILE_JSON" ]; then
+      PROFILE_BUNDLE="$(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+c = d.get("content")
+if isinstance(c, str):
+    c = json.loads(c)
+print((c.get("bundle-info") or {}).get("bundle-name", ""))
+' "$PROFILE_JSON" 2>/dev/null)"
+    fi
+    rm -f "$PROFILE_JSON"
+    HAP_BUNDLE="$(unzip -p "$HAP" config.json 2>/dev/null | python3 -c '
+import json, sys
+print(json.load(sys.stdin).get("app", {}).get("bundleName", ""))
+' 2>/dev/null)"
+    if [ -z "$PROFILE_BUNDLE" ]; then
+      echo "WARN: 无法从 profile 解析 bundle-name，跳过包名预检。" >&2
+    elif [ "$PROFILE_BUNDLE" != "$HAP_BUNDLE" ]; then
+      SIGN_MISMATCH="$PROFILE_BUNDLE != $HAP_BUNDLE"
+    fi
+  else
+    echo "WARN: 没有 python3，跳过 profile 包名预检。" >&2
+  fi
+
+  if [ -n "$SIGN_MISMATCH" ]; then
+    cat >&2 <<MSG
+
+========================================================================
+拒绝签名：签名 profile 授权的包名与本 HAP 不一致。
+   profile 授权 : ${SIGN_MISMATCH%% != *}
+   HAP 声明     : ${SIGN_MISMATCH##* != }
+签出来的包证书链有效，但设备按包名校验会拒绝安装——"签名成功"
+在这里没有意义。本次退回**未签名产物**。
+正确做法：把手表自己的证书/profile 放进 signing/（或设 WATCH_SIGN_*），
+不要用别的应用的 profile 顶替。
+========================================================================
+MSG
+  else
   SIGNED_HAP="$OUT_DIR/entry-default-$MODE-signed.hap"
   echo "Signing $HAP -> $(basename "$SIGNED_HAP")"
   java -jar "$HAP_SIGN_TOOL" sign-app \
@@ -160,11 +210,12 @@ if [ -n "$SIGN_P12" ] || [ -n "$SIGN_CER" ] || [ -n "$SIGN_PROFILE" ]; then
   rm -f "$OUT_DIR/verify.cer" "$OUT_DIR/verify.p7b" "$OUT_DIR/verify.log"
   HAP="$SIGNED_HAP"
   UNSIGNED=0
+  fi
 fi
 
 "$REPO_ROOT/tests/build_artifact_check.sh" \
   "$REPO_ROOT/apps/watch/$HAP" \
-  --bundle 'com.xiwei.suyue' \
+  --bundle 'com.xiwei753.gt4reader.watch' \
   --device liteWearable \
   --mode "$MODE"
 
@@ -173,10 +224,13 @@ if [ "$UNSIGNED" = "1" ]; then
 
 ========================================================================
 注意：本次产物是 **未签名 HAP**，不可安装到 GT 4。
-原因是没有找到签名材料：环境变量 WATCH_SIGN_* 未设置，且
-$REPO_ROOT/signing/ 下没有 .p12/.cer/.p7b。
 
-签名材料就位后本脚本会自动改走已验证的路径：未签名构建 →
+两种原因之一（上面的日志会指明是哪种）：
+  1. 没有找到签名材料：WATCH_SIGN_* 未设置，且
+     $REPO_ROOT/signing/ 下没有 .p12/.cer/.p7b；
+  2. 找到了 profile，但它授权的包名与本 HAP 不一致，已拒绝签名。
+
+材料就位后本脚本会自动走已验证的路径：未签名构建 →
 hap-sign-tool sign-app → verify-app，产物名为
 entry-default-<mode>-signed.hap。
 

@@ -213,22 +213,23 @@ assert.ok(peerIdentity.includes('PHONE_SELF'),
   'PeerIdentity must define PHONE_SELF');
 assert.ok(peerIdentity.includes('WATCH_PEER'),
   'PeerIdentity must define WATCH_PEER');
+// issue #2：手机包名对齐 AGC 证书里的 com.xiwei.suyue；
+// 手表包名暂留历史值，等确认后另行改动。
+const WATCH_BUNDLE = 'com.xiwei753.gt4reader.watch';
+const PHONE_BUNDLE = 'com.xiwei.suyue';
 assert.ok(
-  peerIdentity.includes(
-    "'com.xiwei753.gt4reader.phone'") &&
-  peerIdentity.includes(
-    "'com.xiwei.suyue'"),
+  peerIdentity.includes("'" + PHONE_BUNDLE + "'") &&
+  peerIdentity.includes("'" + WATCH_BUNDLE + "'"),
   'both peer bundle names must be defined');
-// issue #2：手表包名从历史值 com.xiwei753.gt4reader.watch 改为
-// com.xiwei.suyue，以匹配 AGC 签发 profile 授权的包名。三处必须一致：
-// 手表 Manifest（签名/安装按它校验）、手表 PeerConfig 的自述、
-// 手机端把谁当 remoteApp。
-assert.equal(watchConfig.app.bundleName, 'com.xiwei.suyue',
-  'watch Manifest bundleName must match the signed profile');
+assert.equal(watchConfig.app.bundleName, WATCH_BUNDLE,
+  'watch Manifest bundleName must equal what the watch peer config declares');
 assert.ok(
   read('apps/watch/entry/src/main/js/MainAbility/wear/PeerConfig.js')
-    .includes("'com.xiwei.suyue'"),
+    .includes("'" + WATCH_BUNDLE + "'"),
   'watch PeerConfig must self-report the same bundle name as its Manifest');
+// 两个包名不能撞在一起：手机与手表是各自独立的 HAP。
+assert.notEqual(PHONE_BUNDLE, WATCH_BUNDLE,
+  'phone and watch bundle names must differ');
 assert.ok(!phoneIndexFull.includes('phoneFingerprint'),
   'phone index must not carry a loose phoneFingerprint');
 assert.ok(phoneIndexFull.includes('WATCH_PEER'),
@@ -418,7 +419,7 @@ function transferLogicSrc() {
 const watchConfigSrc = read(
   'apps/watch/entry/src/main/config.json');
 assert.ok(watchConfigSrc.includes(
-  'com.xiwei753.gt4reader.phone:CONFIGURE_WITH_SIGNED_PHONE_FINGERPRINT'),
+  'com.xiwei.suyue:CONFIGURE_WITH_SIGNED_PHONE_FINGERPRINT'),
   'repo keeps the supportLists placeholder for build-time injection');
 assert.ok(watchWf.includes('--manifest '),
   'watch workflow must inject the manifest fingerprint');

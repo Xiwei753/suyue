@@ -60,23 +60,23 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
 
 - 工程结构已对齐 Lite Wearable 参考示例（`build-profile.json5` 含 `signingConfig`/`strictMode`、`hvigor/hvigor-config.json5`、`entry/hvigorfile.ts`、`resources/base/media/icon{,_small}.png`、`config.json` 的 `"$media:icon"`）。
 - 本地构建：`tools/build_watch_lite.sh debug|release`；需要 DevEco `hvigorw` 与 Lite Wearable SDK，缺失时明确报错，不用 Node 检查冒充构建。
-- **本机已真实编译并签名成功**（release）：产物
-  `entry-default-release-signed.hap`，211,287 字节，
-  `build_artifact_check.sh` 报 `signed=yes`，`hap-sign-tool verify-app`
-  报 `Digest verify result: true` / `verify: Verify success`。
-  包内 `app.bc` (806 B)、`pages/index/index.bc` (29,938 B)、
+- **本机已真实编译成功；签名目前被拒绝，产物是未签名的**（release）：
+  `entry-default-unsigned.hap`，192,409 字节。原因不是缺材料，而是
+  `signing/` 里现有的证书/profile 属于**手机**（包名 `com.xiwei.suyue`），
+  与手表 HAP 的包名不一致，脚本按包名预检**拒绝签名**并退回未签名产物。
+  这个坑很隐蔽：拿手机 profile 签手表 HAP，`hap-sign-tool` 照样报
+  `Sign Hap success!`，但设备按包名校验会拒绝安装——"签名成功"没有意义。
+  **手表自己的证书/profile 尚未签发。**
+  包内快照齐全：`app.bc` (806 B)、`pages/index/index.bc` (29,938 B)、
   `pages/reader/reader.bc` (21,802 B)。
-- **HAP 不是可复现构建**：SHA-256 每次都不一样（打包写入时间戳）。
-  核对产物请认 `.bc` 条目与体积，别把某个 SHA 当内容指纹。
-- **包名**：手表 HAP 用 `com.xiwei.suyue`（匹配 AGC profile 授权的
-  包名）。历史值 `com.xiwei753.gt4reader.watch` 已弃用。
-  手机端包名仍为 `com.xiwei753.gt4reader.phone`。
-- 签名走的是**未签名构建 + `hap-sign-tool sign-app`**：hvigor 的
-  `signingConfigs` 在这个 legacy Lite 工程上实测失败
+- **包名**：手表仍是历史值 `com.xiwei753.gt4reader.watch`，**待确认后另改**；
+  手机已按 AGC 证书对齐为 `com.xiwei.suyue`。
+- 签名走的是**未签名构建 + `hap-sign-tool sign-app` + `verify-app`**：
+  hvigor 的 `signingConfigs` 在这个 legacy Lite 工程上实测失败
   （`SignHap` → `00308018 ENOENT: stat '<dir>/material'`），
   与素笺 CI 采用同一条绕行路径。材料放在 gitignore 掉的
   `signing/` 目录，说明见 [signing/README.md](../../signing/README.md)。
-- **仍未在真机安装验证**：签名只证明包完整、证书链有效，
+- **从未在真机安装验证**：签名（一旦包名匹配）也只证明包完整、证书链有效，
   不代表 GT 4 接受安装（profile 是 debug 类型、绑定 UDID，
   且设备端还会校验包名/UDID/有效期）。
 - 图标必须小尺寸：`tools/gen_watch_icons.py` 曾生成 1024×1024 的
@@ -91,8 +91,9 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
 ## 未完成
 
 - 手机发书 → 手表接收文件 → 校验 → 加入书架的完整闭环；Wear Engine 文件通道回调字段待真机确认。
-- **签名**：素阅自己的华为签名材料（`.p12`/`.cer`/`.profile`）尚未配置，
-  只能产出未签名 HAP；签名与"可安装"状态未验证。
+- **签名**：现有签名材料属于手机（`com.xiwei.suyue`），**手表自己的
+  证书/profile 尚未签发**，所以手表只能产出未签名 HAP；包名匹配后签名
+  与"可安装"状态才谈得上验证。
 - 表冠翻页：机制已接入并通过纯逻辑单测，但 **GT4 是否真的下发旋转事件、
   每页阈值多少，必须真机实测**（见 `reader/CrownInput.js` 顶部说明）。
 - 圆屏真实像素分页（当前为估算字宽，待 GT4 46mm 真机校准）。

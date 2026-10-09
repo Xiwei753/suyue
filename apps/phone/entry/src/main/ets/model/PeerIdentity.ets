@@ -19,12 +19,12 @@ export interface PeerIdentity {
 }
 
 export const PHONE_SELF: PeerIdentity = {
-  bundleName: 'com.xiwei753.gt4reader.phone',
+  bundleName: 'com.xiwei.suyue',
   fingerprint: ''
 };
 
 export const WATCH_PEER: PeerIdentity = {
-  bundleName: 'com.xiwei.suyue',
+  bundleName: 'com.xiwei753.gt4reader.watch',
   fingerprint: ''
 };
 

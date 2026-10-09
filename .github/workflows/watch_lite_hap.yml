@@ -75,7 +75,7 @@ jobs:
             --fingerprint-key phone \
             --fingerprint-format "${{ vars.WATCH_FINGERPRINT_FORMAT || 'raw' }}" \
             --manifest apps/watch/entry/src/main/config.json \
-            --manifest-peer-bundle com.xiwei753.gt4reader.phone
+            --manifest-peer-bundle com.xiwei.suyue
 
       - name: Build Lite Wearable HAP
         run: tools/build_watch_lite.sh release
@@ -102,7 +102,7 @@ jobs:
           PHONE_FP="$(printf '%s' "$WATCH_SIGNING_MATERIAL" | python3 -c \
             'import json,sys; print(json.load(sys.stdin)["fingerprints"]["phone"])')"
           tests/build_artifact_check.sh "${{ steps.hap.outputs.path }}" \
-            --bundle com.xiwei.suyue \
+            --bundle com.xiwei753.gt4reader.watch \
             --device liteWearable \
             --mode release \
             --expect-fingerprint "$PHONE_FP"

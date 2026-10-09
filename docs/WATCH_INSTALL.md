@@ -1,11 +1,12 @@
-# GT 4 46mm 安装与构建说明（已编译并签名，未实机安装）
+# GT 4 46mm 安装与构建说明（已编译，未签名，未实机安装）
 
-> 状态（issue #2 更新）：**手表 Lite 工程已在本机真实编译并签名成功**，
-> 产出 `entry-default-release-signed.hap`（211,287 字节），
-> `signed=yes`，`verify-app` 报 `Verify success`；包名已改为
-> `com.xiwei.suyue` 以匹配 AGC profile 授权的包名。
-> 但**仍未在 GT 4 上安装**——签名有效不等于设备接受安装。
-> 第 1 阶段验收：**暂不通过**，剩余阻断是真机安装与运行验证。
+> 状态（issue #2 更新）：**手表 Lite 工程已在本机真实编译成功**，产出
+> `entry-default-unsigned.hap`（192,409 字节，含完整页面快照）。
+> **但产物未签名**：`signing/` 里现有的证书/profile 属于**手机**
+> （包名 `com.xiwei.suyue`），与手表 HAP 包名不一致，签名脚本按包名
+> 预检**拒绝签名**并退回未签名产物。手表自己的证书/profile 尚未签发。
+> 也**从未在 GT 4 上安装**。
+> 第 1 阶段验收：**暂不通过**，阻断是手表签名材料 + 真机验证。
 
 ## 前置条件
 
@@ -22,12 +23,15 @@
    - `$HOME/.harmony-cli/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar`
    - `$HOME/.harmony-cli/tool/node`（hvigor 自带的 Node）
 4. 签名材料放在仓库内 **gitignore 掉的** `signing/` 目录
-   （或用 `WATCH_SIGN_*` 环境变量指向别处）。组成与来源说明见
+   （或用 `WATCH_SIGN_*` 环境变量指向别处）。详细说明见
    [signing/README.md](../signing/README.md)：
    - 私钥：与素笺**共用同一对密钥**（公钥指纹 `3df9743c…` 实测一致），
      可以复用；
    - 证书 `.cer` 与 profile `.p7b`：**按应用签发**，不可复用。
-     `suyue-debug.p7b` 是 debug 类型、绑定 UDID、有效期到 2027-10-09。
+     **现有 `suyue-debug.p7b` 是手机的**（`bundle-name: com.xiwei.suyue`，
+     debug 类型、绑定 2 个 UDID、有效期到 2027-10-09），**不能用来签手表**。
+   - 手表自己的证书/profile 尚未签发；一旦放进 `signing/`，
+     构建脚本会自动启用签名（前提是包名匹配）。
 
 ## 本地构建（已验证）
 
@@ -41,30 +45,29 @@ tools/build_watch_lite.sh release    # 或 debug
 **本机实测结果（`tools/build_watch_lite.sh release`）**：
 
 ```text
-HAP_PATH=.../entry-default-unsigned.hap
-Signing entry-default-unsigned.hap -> entry-default-release-signed.hap
-sign-app success
-Verifying signature of entry-default-release-signed.hap
-Digest verify result: true, DigestAlgorithm: SHA-256
-verify: Verify success
-HAP_OK path=.../entry-default-release-signed.hap manifest=config.json
-       size=211287 mode=release signed=yes
+拒绝签名：签名 profile 授权的包名与本 HAP 不一致。
+   profile 授权 : com.xiwei.suyue
+   HAP 声明     : com.xiwei753.gt4reader.watch
+WARN: HAP is unsigned (no signingConfigs): entry-default-unsigned.hap
+HAP_OK path=.../entry-default-unsigned.hap manifest=config.json
+       size=192409 mode=release signed=no
 ```
 
 - 包内快照齐全：`app.bc` (806 B)、`pages/index/index.bc` (29,938 B)、
   `pages/reader/reader.bc` (21,802 B)。
 - 资源：`icon.png.bin` 43,272 B、`icon_small.png.bin` 33,864 B。
-- **签名方式**：未签名构建 → `hap-sign-tool sign-app` → `verify-app`。
-  **不要**改回 hvigor 的 `signingConfigs`：本机实测在该 legacy Lite
-  工程上 `SignHap` 直接失败——
+- **包名预检是刻意的**：拿手机的 profile 签手表 HAP，`hap-sign-tool`
+  照样报 `Sign Hap success!`、`verify-app` 也报 `Verify success`，
+  但设备按包名校验会拒绝安装——那种"签名成功"是假绿灯，所以脚本
+  在不匹配时直接不签。
+- **不要用 hvigor 的 `signingConfigs`**：本机实测在该 legacy Lite 工程上
+  `SignHap` 直接失败——
   `Error Code: 00308018 ENOENT: no such file or directory, stat '<dir>/material'`。
-  素笺 CI 用的是同一条绕行路径。
-- **SHA-256 不可复现**：同一源码重编两次字节数相同但摘要不同
-  （打包写入时间戳）。验收请比对 `.bc` 条目与体积。
+  素笺 CI 用的是同一条绕行路径（未签名构建 + `hap-sign-tool sign-app`）。
 - **`verify-app` 的输出文件必须用 `.cer` 后缀**：写成 `.crt` 会报
   `Error Message: Not support file`（实测）。
-- 包名：HAP 内 `app.bundleName` = `com.xiwei.suyue`，
-  与 profile 的 `bundle-info.bundle-name` 一致。
+- **SHA-256 不可复现**：同一源码重编两次字节数相同但摘要不同
+  （打包写入时间戳）。验收请比对 `.bc` 条目与体积。
 
 ## CI
 
@@ -104,14 +107,16 @@ HAP_OK path=.../entry-default-release-signed.hap manifest=config.json
 - `targetSdkVersion` / `compatibleSdkVersion` 的 `6.1.1(24)` 来自轻智能手表示例模板，
   **尚未确认为 GT 4 开发安装实际可用的版本**；需在真实 DevEco 环境中核对。
 - Wear Engine 接收依赖手机端证书指纹，尚未配置（见 `wear/PeerConfig.js`）。
-- **真机安装尚未做**：签名通过只证明 HAP 完整、证书链有效。设备端还会
-  校验 profile 的包名、`debug-info.device-ids`（本 profile 只列了 2 个
-  UDID）、有效期与设备调试状态。这几项都没在 GT 4 上验证过，因此
-  第 1 阶段"可安装"验收**仍未达成**，不能关闭议题 #2。
+- **手表签名材料尚未签发**：现有 profile 是手机的，不能顶替。没有它
+  就产不出可安装的手表 HAP，因此第 1 阶段"可安装"验收**尚未达成**，
+  不能关闭议题 #2。
+- **真机安装尚未做**：签名通过也只证明 HAP 完整、证书链有效。设备端还会
+  校验 profile 的包名、`debug-info.device-ids`（需要手表的 UDID）、
+  有效期与设备调试状态。这几项都没在 GT 4 上验证过。
 - **CI 的签名路径尚未同步**：`watch_lite_hap.yml` 仍按
   `tools/inject_signing.py` 写 hvigor `signingConfigs` 的方式签名，
   而那条路在本机实测失败（`SignHap` → `00308018`）。要让它能产出
   签名 HAP，需改成与本地脚本一致的"未签名构建 + `hap-sign-tool
   sign-app` + `verify-app`"。
-- 手机端包名 `com.xiwei753.gt4reader.phone` 未改，也还没有对应的
-  AGC 应用与 profile；手机 HAP 仍未构建。
+- 手机包名已改为 `com.xiwei.suyue`（对应现有 AGC 应用与证书），
+  但**手机 HAP 仍未构建**；手表包名待确认。

@@ -11,8 +11,8 @@
 | 文件 | 是什么 | 能否复用 |
 |---|---|---|
 | `shared-signing-key.p12` | ECDSA P-256 私钥。别名 `sujian_signing_20261007` | **可复用**（见下） |
-| `suyue-debug.cer` | 素阅的**调试**证书（华为签发） | 按应用签发 |
-| `suyue-debug.p7b` | 素阅的**调试** provisioning profile | 按应用签发 |
+| `suyue-debug.cer` | **手机**（`com.xiwei.suyue`）的**调试**证书，华为签发 | 按应用签发 |
+| `suyue-debug.p7b` | **手机**的**调试** provisioning profile | 按应用签发 |
 | `credentials.env` | p12 的别名与口令（`KEY_ALIAS`/`STORE_PASSWORD`/`KEY_PASSWORD`） | — |
 
 ## 为什么私钥可以复用，证书和 profile 不能
@@ -39,32 +39,36 @@
 
 profile 绑定包名，**它授权的是 `com.xiwei.suyue`**。
 
-## 包名已对齐（issue #2）
+## ⚠️ 这套材料是**手机**的，不是手表的
 
-profile 授权 `com.xiwei.suyue`，手表工程原先用历史包名
-`com.xiwei753.gt4reader.watch`，两者不一致。已按指示把**手表 HAP 的包名**
-改成 `com.xiwei.suyue`，四处同步：
+`suyue-debug.p7b` 的 `bundle-info.bundle-name` 是 **`com.xiwei.suyue`**，
+这就是**手机应用**的包名（AGC 证书里写定的）。因此：
 
-| 位置 | 值 |
-|---|---|
-| `apps/watch/entry/src/main/config.json` → `app.bundleName` | `com.xiwei.suyue` |
-| `apps/watch/.../wear/PeerConfig.js` → `WATCH_BUNDLE_NAME` | `com.xiwei.suyue` |
-| `apps/phone/.../model/PeerIdentity.ets` → `WATCH_PEER.bundleName` | `com.xiwei.suyue` |
-| `tools/build_watch_lite.sh` / `watch_lite_hap.yml` 的 `--bundle` | `com.xiwei.suyue` |
-
-`tests/source-contract.test.mjs` 现在会强制校验这三处一致，
-避免以后只改一处。
-
-**手机端包名仍是 `com.xiwei753.gt4reader.phone`**，它作为对端被手表
-`config.json` 的 `supportLists` 与 `PeerConfig.PHONE_BUNDLE_NAME` 引用
-（14 处）。若以后也要改名，必须同样整体同步，并且需要 AGC 为它单独
-建应用、签发 profile。
+- 手机包名已按证书对齐为 `com.xiwei.suyue`
+  （`AppScope/app.json5`、`PeerIdentity.ets` 的 `PHONE_SELF`、
+  手表侧作为对端的 `PeerConfig.PHONE_BUNDLE_NAME` 与 `config.json`
+  的 `supportLists`）。
+- **手表包名暂未定**，仍保留历史值 `com.xiwei753.gt4reader.watch`，
+  等确认后再改。手表与手机的包名由
+  `tests/source-contract.test.mjs` 断言「两处一致且互不相同」。
+- **本目录的 profile 不能用来签手表 HAP**。`tools/build_watch_lite.sh`
+  已加包名预检：profile 授权的包名与 HAP 不一致时**拒绝签名**并退回
+  未签名产物。这个坑很隐蔽——拿手机的 profile 签手表 HAP，
+  `hap-sign-tool` 照样报 `Sign Hap success!`，但设备按包名校验会拒绝安装。
+- 手表自己的证书/profile 一旦签发，放进来即可自动启用签名
+  （文件名不限，取目录下第一个 `.p12` / `.cer` / `.p7b`）。
 
 ## 用法
 
-CI 走 `tools/inject_signing.py`（`secrets.WATCH_SIGNING_MATERIAL`，JSON +
-base64），把材料落盘、写 `signingConfigs`、注入指纹，构建后清理并
-`git checkout` 还原配置。本地调试可直接改 `apps/watch/build-profile.json5`
-的 `signingConfigs` 后运行 `tools/build_watch_lite.sh release`，
-**构建完记得 `git checkout -- apps/watch/build-profile.json5` 还原**，
-不要把签名路径和口令留在被跟踪的文件里。
+- **手表（本地已跑通）**：`tools/build_watch_lite.sh release`。脚本按
+  `WATCH_SIGN_*` 环境变量 → `signing/` 目录 的顺序找材料，找到且
+  **包名匹配**时自动走：未签名构建 → `hap-sign-tool sign-app` →
+  `verify-app`，产物 `entry-default-<mode>-signed.hap`。
+- **不要用 hvigor 的 `signingConfigs`**：本机实测在该 legacy Lite 工程上
+  `SignHap` 直接失败（`00308018 ENOENT: stat '<dir>/material'`），
+  即使配置形状与 Stage 工程一致。素笺 CI 用的也是下面的绕行路径。
+- **CI（尚未同步）**：`watch_lite_hap.yml` 目前仍走
+  `tools/inject_signing.py` 写 `signingConfigs` 的方式——即上述被证伪的
+  那条，需要改成与本地脚本一致的 `sign-app` + `verify-app`。
+- 注意 `verify-app` 的 `-outCertChain` 必须用 `.cer` 后缀；
+  用 `.crt` 会报 `Error Message: Not support file`（实测）。

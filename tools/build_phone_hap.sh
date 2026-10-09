@@ -46,6 +46,6 @@ fi
 echo "HAP_PATH=$REPO_ROOT/apps/phone/$HAP"
 "$REPO_ROOT/tests/build_artifact_check.sh" \
   "$REPO_ROOT/apps/phone/$HAP" \
-  --bundle 'com.xiwei753.gt4reader.phone' \
+  --bundle 'com.xiwei.suyue' \
   --device phone \
   --mode "$MODE"
