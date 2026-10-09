@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Wear Engine 适配层（保留）：版本检查、签名指纹门控、
-// 消息订阅；协议消息路由到 IncomingBookReceiver。
+// Wear Engine 适配层：版本检查、签名指纹门控、
+// 消息订阅；协议消息与文件通道路由到
+// IncomingBookReceiver；所有回执经
+// wearengine.sendMsg 发回手机（P0-6）。
 // Based on Wear Engine receiver call patterns from
 // Explore in HMOS Wearable (MIT).
 // Does not vendor the upstream Huawei SDK wrapper (Apache-2.0).
@@ -10,8 +12,10 @@ import { IncomingBookReceiver } from './IncomingBookReceiver';
 
 let subscribed = false;
 let receiver = null;
+// 手表 → 手机的唯一回执通道（wearengine.sendMsg）。
+var sendToPhoneImpl = null;
 
-export function beginReceive(onStatus, sendToPhone) {
+export function beginReceive(onStatus) {
   const notify = (message) => {
     if (typeof onStatus === 'function') onStatus(message);
   };
@@ -19,6 +23,27 @@ export function beginReceive(onStatus, sendToPhone) {
     notify('未配置手机签名，传书接收暂未开启');
     return;
   }
+  // 手表 → 手机：唯一回执通道。
+  // 形状以华为 Lite 示例为准（待真机验证）：
+  //   wearengine.sendMsg({deviceId, bundleName,
+  //     abilityName, message, success, fail})
+  const sendToPhone = (text) => {
+    try {
+      wearengine.sendMsg({
+        deviceId: 'remote',
+        bundleName: PHONE_BUNDLE_NAME,
+        abilityName: '',
+        message: text,
+        success: () => {},
+        fail: (data, code) => {
+          console.error('sendMsg failed: ' + code);
+        }
+      });
+    } catch (error) {
+      console.error('sendMsg error: ' + error);
+    }
+  };
+  sendToPhoneImpl = sendToPhone;
   try {
     wearengine.getWearEngineVersion({
       sdkVersion: '3',
@@ -36,19 +61,20 @@ export function beginReceive(onStatus, sendToPhone) {
               appName: PHONE_BUNDLE_NAME,
               appCert: PHONE_CERT_FINGERPRINT,
               complete: () => {
-                receiver = new IncomingBookReceiver(notify);
+                receiver = new IncomingBookReceiver(
+                  notify, sendToPhone);
                 wearengine.subscribeMsg({
                   success: (data) => {
                     if (data && data.isRegister) {
                       subscribed = true;
                       notify('传书接收已开启');
                     } else if (data && data.isFileType) {
-                      // 文件通道到达：路径由 Wear Engine 回调
-                      // 给出，待真机确认回调字段后接入
-                      // receiveFileChannel（当前不落盘、不入书架）。
-                      notify('收到文件，待接入文件通道校验');
+                      // 文件通道到达：data.file 是
+                      // Wear Engine 送达的文件路径
+                      // （字段名以真机回调为准，待验证）。
+                      receiveFile(data.file);
                     } else if (data && typeof data.message === 'string') {
-                      routeMessage(data.message, sendToPhone);
+                      routeMessage(data.message);
                     }
                   },
                   fail: (reason, code) => notify('接收注册失败：' + code)
@@ -66,18 +92,32 @@ export function beginReceive(onStatus, sendToPhone) {
   }
 }
 
-function routeMessage(messageText, sendToPhone) {
+function routeMessage(messageText) {
   if (!receiver) return;
-  receiver.onMessage(messageText, (response) => {
-    // ACK/RESUME 回执：发送 API 以真机为准（待验证）。
-    if (typeof sendToPhone === 'function') {
-      sendToPhone(JSON.stringify(response));
-    }
-  });
+  // ACK/RESUME/RESULT 全部由接收器内部
+  // 经统一响应通道（sendToPhone）回发。
+  receiver.onMessage(messageText);
+}
+
+// 文件通道：把 Wear Engine 送达的文件交给
+// IncomingBookReceiver 复制 → 校验 → 入库。
+// 结果（RESULT）由接收器统一经 sendToPhone 回发。
+function receiveFile(filePath) {
+  if (!receiver || !filePath) {
+    return;
+  }
+  receiver.receiveFileChannel(filePath,
+    /* fileApi */ null, (outcome) => {
+      if (!outcome.ok) {
+        console.error('file channel failed: ' +
+          outcome.reason);
+      }
+    });
 }
 
 export function stopReceive() {
   receiver = null;
+  sendToPhoneImpl = null;
   if (!subscribed) return;
   try {
     wearengine.unsubscribeMsg();

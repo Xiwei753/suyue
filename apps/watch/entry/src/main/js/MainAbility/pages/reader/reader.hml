@@ -2,12 +2,17 @@
   <div class="reading-area">
     <text class="book-title" style="color: {{ theme === 'day' ? '#5b6470' : '#9da3af' }};" onclick="backToLibrary">{{ title }}</text>
     <text class="book-text" style="font-size: {{ fontSize }}px; line-height: {{ fontSize * lineHeightRatio }}px; color: {{ theme === 'day' ? '#1c1e22' : '#f3f3f3' }};">{{ body }}</text>
+    <!-- 主操作：仅上页/下页（P2-13），不挤占正文区 -->
     <div class="controls">
       <text class="nav" style="color: {{ theme === 'day' ? '#1c1e22' : '#e8edf5' }};" onclick="previousPage">上页</text>
+      <text class="nav" style="color: {{ theme === 'day' ? '#1c1e22' : '#e8edf5' }};" onclick="toggleSettings">设置</text>
+      <text class="nav" style="color: {{ theme === 'day' ? '#1c1e22' : '#e8edf5' }};" onclick="nextPage">下页</text>
+    </div>
+    <!-- 二级交互：字号与主题，收起时不渲染 -->
+    <div class="controls" if="{{ settingsOpen }}">
       <text class="nav" style="color: {{ theme === 'day' ? '#1c1e22' : '#e8edf5' }};" onclick="changeFont(-1)">A-</text>
       <text class="nav" style="color: {{ theme === 'day' ? '#1c1e22' : '#e8edf5' }};" onclick="toggleTheme">{{ theme === 'day' ? '夜间' : '日间' }}</text>
       <text class="nav" style="color: {{ theme === 'day' ? '#1c1e22' : '#e8edf5' }};" onclick="changeFont(1)">A+</text>
-      <text class="nav" style="color: {{ theme === 'day' ? '#1c1e22' : '#e8edf5' }};" onclick="nextPage">下页</text>
     </div>
     <text class="page-number" style="color: {{ theme === 'day' ? '#8a919c' : '#858b96' }};">{{ pageHint }}</text>
   </div>

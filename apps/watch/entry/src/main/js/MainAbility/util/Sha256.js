@@ -54,67 +54,110 @@ function toHex(word) {
 }
 
 export function sha256Bytes(bytes) {
-  var len = bytes.length;
-  var bitLenHi = Math.floor((len / 0x20000000)); // len*8 / 2^32
-  var bitLenLo = (len * 8) >>> 0;
-  var total = (((len + 9 + 63) >> 6) << 6);
-  var msg = new Uint8Array(total);
-  msg.set(bytes);
-  msg[len] = 0x80;
-  msg[total - 8] = (bitLenHi >>> 24) & 0xff;
-  msg[total - 7] = (bitLenHi >>> 16) & 0xff;
-  msg[total - 6] = (bitLenHi >>> 8) & 0xff;
-  msg[total - 5] = bitLenHi & 0xff;
-  msg[total - 4] = (bitLenLo >>> 24) & 0xff;
-  msg[total - 3] = (bitLenLo >>> 16) & 0xff;
-  msg[total - 2] = (bitLenLo >>> 8) & 0xff;
-  msg[total - 1] = bitLenLo & 0xff;
+  var hasher = createSha256();
+  hasher.update(bytes);
+  return hasher.digest();
+}
 
+// 流式 SHA-256：大文件按固定窗口分块喂入，
+// 峰值内存只有单个窗口（施工单 P1-11）。
+// 返回 { update(bytes), digest() }。
+export function createSha256() {
   var h = SHA256_H0.slice();
+  var block = new Uint8Array(64);
+  var blockLen = 0;
+  var totalLen = 0;
   var w = new Array(64);
+  return {
+    update: function (bytes) {
+      var i = 0;
+      totalLen += bytes.length;
+      while (i < bytes.length) {
+        var need = 64 - blockLen;
+        var take = need < (bytes.length - i) ?
+          need : (bytes.length - i);
+        for (var j = 0; j < take; j++) {
+          block[blockLen + j] = bytes[i + j];
+        }
+        blockLen += take;
+        i += take;
+        if (blockLen === 64) {
+          compress(h, block, w);
+          blockLen = 0;
+        }
+      }
+    },
+    digest: function () {
+      var bitLenHi = Math.floor(totalLen / 0x20000000);
+      var bitLenLo = (totalLen * 8) >>> 0;
+      block[blockLen] = 0x80;
+      blockLen += 1;
+      if (blockLen > 56) {
+        for (var p = blockLen; p < 64; p++) {
+          block[p] = 0;
+        }
+        compress(h, block, w);
+        blockLen = 0;
+      }
+      for (var q = blockLen; q < 56; q++) {
+        block[q] = 0;
+      }
+      block[56] = (bitLenHi >>> 24) & 0xff;
+      block[57] = (bitLenHi >>> 16) & 0xff;
+      block[58] = (bitLenHi >>> 8) & 0xff;
+      block[59] = bitLenHi & 0xff;
+      block[60] = (bitLenLo >>> 24) & 0xff;
+      block[61] = (bitLenLo >>> 16) & 0xff;
+      block[62] = (bitLenLo >>> 8) & 0xff;
+      block[63] = bitLenLo & 0xff;
+      compress(h, block, w);
+      return toHex(h[0]) + toHex(h[1]) + toHex(h[2]) +
+        toHex(h[3]) + toHex(h[4]) + toHex(h[5]) +
+        toHex(h[6]) + toHex(h[7]);
+    }
+  };
+}
 
-  for (var block = 0; block < total; block += 64) {
-    var i;
-    for (i = 0; i < 16; i++) {
-      w[i] = ((msg[block + i * 4] << 24) |
-        (msg[block + i * 4 + 1] << 16) |
-        (msg[block + i * 4 + 2] << 8) |
-        msg[block + i * 4 + 3]) >>> 0;
-    }
-    for (i = 16; i < 64; i++) {
-      var s0 = (rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^
-        (w[i - 15] >>> 3)) >>> 0;
-      var s1 = (rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^
-        (w[i - 2] >>> 10)) >>> 0;
-      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
-    }
-    var a = h[0], b = h[1], c = h[2], d = h[3];
-    var e = h[4], f = h[5], g = h[6], hh = h[7];
-    for (i = 0; i < 64; i++) {
-      var S1 = (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) >>> 0;
-      var ch = ((e & f) ^ (~e & g)) >>> 0;
-      var t1 = (hh + S1 + ch + SHA256_K[i] + w[i]) >>> 0;
-      var S0 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) >>> 0;
-      var maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
-      var t2 = (S0 + maj) >>> 0;
-      hh = g;
-      g = f;
-      f = e;
-      e = (d + t1) >>> 0;
-      d = c;
-      c = b;
-      b = a;
-      a = (t1 + t2) >>> 0;
-    }
-    h[0] = (h[0] + a) >>> 0;
-    h[1] = (h[1] + b) >>> 0;
-    h[2] = (h[2] + c) >>> 0;
-    h[3] = (h[3] + d) >>> 0;
-    h[4] = (h[4] + e) >>> 0;
-    h[5] = (h[5] + f) >>> 0;
-    h[6] = (h[6] + g) >>> 0;
-    h[7] = (h[7] + hh) >>> 0;
+// 单块压缩：消息扩展 + 64 轮。
+function compress(h, block, w) {
+  var i;
+  for (i = 0; i < 16; i++) {
+    w[i] = ((block[i * 4] << 24) |
+      (block[i * 4 + 1] << 16) |
+      (block[i * 4 + 2] << 8) |
+      block[i * 4 + 3]) >>> 0;
   }
-  return toHex(h[0]) + toHex(h[1]) + toHex(h[2]) + toHex(h[3]) +
-    toHex(h[4]) + toHex(h[5]) + toHex(h[6]) + toHex(h[7]);
+  for (i = 16; i < 64; i++) {
+    var s0 = (rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^
+      (w[i - 15] >>> 3)) >>> 0;
+    var s1 = (rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^
+      (w[i - 2] >>> 10)) >>> 0;
+    w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+  }
+  var a = h[0], b = h[1], c = h[2], d = h[3];
+  var e = h[4], f = h[5], g = h[6], hh = h[7];
+  for (i = 0; i < 64; i++) {
+    var S1 = (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) >>> 0;
+    var ch = ((e & f) ^ (~e & g)) >>> 0;
+    var t1 = (hh + S1 + ch + SHA256_K[i] + w[i]) >>> 0;
+    var S0 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) >>> 0;
+    var maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
+    var t2 = (S0 + maj) >>> 0;
+    hh = g;
+    g = f;
+    f = e;
+    e = (d + t1) >>> 0;
+    d = c;
+    c = b;
+    b = a;
+    a = (t1 + t2) >>> 0;
+  }
+  h[0] = (h[0] + a) >>> 0;
+  h[1] = (h[1] + b) >>> 0;
+  h[2] = (h[2] + c) >>> 0;
+  h[3] = (h[3] + d) >>> 0;
+  h[4] = (h[4] + e) >>> 0;
+  h[5] = (h[5] + f) >>> 0;
+  h[6] = (h[6] + g) >>> 0;
+  h[7] = (h[7] + hh) >>> 0;
 }

@@ -1,12 +1,23 @@
 name: Phone Stage HAP build (self-hosted DevEco required)
 # 源码检查（pagination-test.yml）不等于 HAP 构建。本 workflow 必须运行在
 # 已安装 HarmonyOS Stage (API 26) DevEco 工具链的自托管 runner 上。
+#
+# 签名材料（secrets.PHONE_SIGNING_MATERIAL，JSON）：
+#   storeFileB64/certpathB64/profileB64: base64 编码的签名文件
+#   keyAlias/keyPassword/storePassword: 口令
+#   signAlg: 默认 SHA256withECDSA
+#   fingerprints: {"phone": 64位hex, "watch": 64位hex}
+#   —— 手表证书指纹注入手机侧 PeerIdentityConfig.g.ets，
+#     作为 remoteApp 用于发送与回执校验。材料只在
+#     构建生命周期内存在，结束步骤（if: always()）
+#     统一清理。
 on:
   push:
     branches: [auto-issue-1, main]
     paths:
       - 'apps/phone/**'
       - 'tools/build_phone_hap.sh'
+      - 'tools/inject_signing.py'
       - 'tests/build_artifact_check.sh'
       - '.github/workflows/phone_hap.yml'
   workflow_dispatch:
@@ -27,15 +38,21 @@ jobs:
             exit 1
           fi
 
-      - name: Materialize signing config (temporary, cleaned up)
+      - name: Stage signing material and signingConfigs
+        # 材料写入 $RUNNER_TEMP（跨 step 持久），
+        # 不在本 step 末尾删除（旧实现的 trap
+        # 会在本 step 结束时删掉材料，导致
+        # 构建 step 读不到——施工单 P1-7）。
         env:
           PHONE_SIGNING_MATERIAL: ${{ secrets.PHONE_SIGNING_MATERIAL }}
         run: |
-          # 签名材料由环境变量注入，临时落盘，构建后立即删除，日志不回显内容。
-          mkdir -p apps/phone/signing
-          printf '%s' "$PHONE_SIGNING_MATERIAL" > apps/phone/signing/material.json5
-          trap 'rm -rf apps/phone/signing' EXIT
-          echo "signing material staged (content hidden)"
+          python3 tools/inject_signing.py \
+            --material-json "$PHONE_SIGNING_MATERIAL" \
+            --signing-dir "$RUNNER_TEMP/suyue-signing" \
+            --build-profile apps/phone/build-profile.json5 \
+            --identity-file apps/phone/entry/src/main/ets/services/PeerIdentityConfig.g.ets \
+            --identity-var INJECTED_WATCH_FINGERPRINT \
+            --fingerprint-key watch
 
       - name: Build Stage HAP
         run: tools/build_phone_hap.sh release
@@ -43,7 +60,11 @@ jobs:
       - name: Locate HAP
         id: hap
         run: |
-          HAP="$(find apps/phone/entry/build/default/outputs/default -name 'entry-default-*.hap' -type f | head -n 1)"
+          HAP="$(find apps/phone/entry/build/default/outputs/default -name 'entry-default-release-*.hap' -type f | head -n 1)"
+          if [ -z "$HAP" ]; then
+            echo "ERROR: release HAP not found" >&2
+            exit 1
+          fi
           echo "path=$HAP" >> "$GITHUB_OUTPUT"
           echo "name=$(basename "$HAP")" >> "$GITHUB_OUTPUT"
           echo "size=$(stat -c%s "$HAP")" >> "$GITHUB_OUTPUT"
@@ -61,3 +82,13 @@ jobs:
           name: suyue-phone-hap
           path: ${{ steps.hap.outputs.path }}
           if-no-files-found: error
+
+      - name: Remove signing material and restore configs
+        # 无论构建成败都执行：签名材料
+        # 不得残留在工作区（施工单 P1-7）。
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/suyue-signing"
+          git checkout -- apps/phone/build-profile.json5 \
+            apps/phone/entry/src/main/ets/services/PeerIdentityConfig.g.ets
+          echo "signing material removed; configs restored"

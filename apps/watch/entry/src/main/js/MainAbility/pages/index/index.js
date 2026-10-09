@@ -2,17 +2,25 @@
 // 书架页：读取真实书库索引，列书名；打开/删除。
 // 迁移桥接：首次启动把旧演示书（demo.txt）迁入
 // 新书库结构后，BookFiles.js 不再被页面引用。
+//
+// 迁移条件（施工单 P2-14）：仅当旧演示文件
+// 确实存在且移动成功才登记；元数据必须是
+// 真实字节数与摘要，绝不用 bytes:0/sha256:''
+// 的假元数据。用户清空书库后绝不自动重造。
 import router from '@system.router';
 import file from '@system.file';
 import { initializeLibrary } from '../../storage/BookFiles';
 import { ensureDirs, bookPath,
-  deleteBook } from '../../storage/BookStorage';
+  deleteBook, fileSize, readWindow }
+  from '../../storage/BookStorage';
 import { listBooks, addBook,
   removeBook } from '../../storage/LibraryIndex';
 import { beginReceive, stopReceive } from '../../wear/WearReceiver';
+import { createSha256 } from '../../util/Sha256';
 
 const DEMO_BOOK_ID = 'aaaa000000000001';
 const DEMO_PATH = 'internal://app/gt4reader/demo.txt';
+var MIGRATE_WINDOW = 64 * 1024;
 
 export default {
   data: {
@@ -48,31 +56,75 @@ export default {
         }
         initializeLibrary((result) => {
           if (!result.ok) {
-            this.status = '本地文件初始化失败：' + result.reason;
+            this.status = '本地文件初始化失败：' +
+              result.reason;
             this.books = [];
             return;
           }
-          file.move({
-            srcUri: DEMO_PATH,
-            dstUri: bookPath(DEMO_BOOK_ID),
-            success: () => this.registerDemo(),
-            fail: () => this.registerDemo()
-          });
+          this.migrateDemo();
         });
       });
     });
   },
-  registerDemo() {
-    addBook({
-      bookId: DEMO_BOOK_ID,
-      title: '中文阅读测试',
-      encoding: 'utf-8',
-      bytes: 0,
-      sha256: '',
-      chunks: 0,
-      chunkBytes: 0,
-      chapters: []
-    }, () => this.refresh());
+  // 一次性迁移：旧文件存在 + 移动成功才登记。
+  migrateDemo() {
+    file.access({
+      uri: DEMO_PATH,
+      success: () => {
+        file.move({
+          srcUri: DEMO_PATH,
+          dstUri: bookPath(DEMO_BOOK_ID),
+          success: () => this.describeMovedDemo(),
+          fail: (data, code) => {
+            this.status = '旧演示书迁移失败：' + code;
+          }
+        });
+      },
+      fail: () => {
+        // 旧文件不存在：不重造测试书。
+        this.status = '书库为空，等待手机传书';
+      }
+    });
+  },
+  // 移动成功后统计真实字节数与摘要，
+  // 再登记索引（拒绝假元数据）。
+  describeMovedDemo() {
+    const dst = bookPath(DEMO_BOOK_ID);
+    fileSize(dst, (stat) => {
+      if (!stat.ok) {
+        this.status = '迁移后校验失败：无法取得大小';
+        return;
+      }
+      const hasher = createSha256();
+      this.hashAll(dst, 0, stat.size, hasher,
+        (digest) => {
+          addBook({
+            bookId: DEMO_BOOK_ID,
+            title: '中文阅读测试',
+            encoding: 'utf-8',
+            bytes: stat.size,
+            sha256: digest,
+            chunks: 0,
+            chunkBytes: 0,
+            chapters: []
+          }, () => this.refresh());
+        });
+    });
+  },
+  hashAll(uri, offset, total, hasher, cb) {
+    if (offset >= total) {
+      return cb(hasher.digest());
+    }
+    const size = Math.min(MIGRATE_WINDOW,
+      total - offset);
+    readWindow(uri, offset, size, (r) => {
+      if (!r.ok) {
+        return cb('');
+      }
+      hasher.update(r.bytes);
+      this.hashAll(uri, offset + size, total,
+        hasher, cb);
+    });
   },
   refresh() {
     listBooks((books) => {

@@ -140,3 +140,64 @@ export function deleteBook(bookId, cb) {
       { ok: false, reason: 'delete_failed', code: code })
   });
 }
+
+// 复制文件（文件通道接收时把 Wear Engine
+// 送达的文件拷入本应用沙箱临时目录）。
+export function copyFile(srcUri, dstUri, cb) {
+  file.copy({
+    srcUri: srcUri,
+    dstUri: dstUri,
+    success: () => complete(cb, { ok: true }),
+    fail: (data, code) => complete(cb,
+      { ok: false, reason: 'copy_failed', code: code })
+  });
+}
+
+export function deleteFile(uri, cb) {
+  file.delete({
+    uri: uri,
+    success: () => complete(cb, { ok: true }),
+    fail: (data, code) => complete(cb,
+      { ok: false, reason: 'delete_failed', code: code })
+  });
+}
+
+// 目标文件字节数（file.get 返回 length）。
+export function fileSize(uri, cb) {
+  file.get({
+    uri: uri,
+    success: (info) => {
+      if (info && typeof info.length === 'number') {
+        return complete(cb, { ok: true,
+          size: info.length });
+      }
+      complete(cb, { ok: false, reason: 'no_size' });
+    },
+    fail: (data, code) => complete(cb,
+      { ok: false, reason: 'stat_failed', code: code })
+  });
+}
+
+// 任意 URI 的二进制窗口读取（文件通道
+// 流式校验用）。
+export function readWindow(uri, offset, size, cb) {
+  const off = typeof offset === 'number' && isFinite(offset) &&
+    offset > 0 ? Math.floor(offset) : 0;
+  file.readArrayBuffer({
+    uri: uri,
+    position: off,
+    length: size,
+    success: (data) => {
+      if (!data || !data.buffer ||
+          typeof data.buffer.byteLength !== 'number') {
+        return complete(cb, { ok: false, reason: 'invalid_buffer' });
+      }
+      complete(cb, {
+        ok: true, offset: off,
+        bytes: new Uint8Array(data.buffer)
+      });
+    },
+    fail: (data, code) => complete(cb,
+      { ok: false, reason: 'read_failed', code: code })
+  });
+}

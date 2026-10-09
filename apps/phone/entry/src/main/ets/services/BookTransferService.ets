@@ -41,6 +41,10 @@ export class BookTransferService {
     resolve: (ok: boolean, reason?: string) => void;
     timer: number;
   }>();
+  // 迟到回执缓存：waiter 已超时后到达的 RESULT
+  // 保留有限条目，供状态查询与重试判断。
+  private receipts = new Map<string, { ok: boolean;
+    reason?: string }>();
   private cancelled = new Set<string>();
 
   constructor(context: common.UIAbilityContext,
@@ -66,11 +70,23 @@ export class BookTransferService {
     if (message.v !== 0 || message.type !== 'RESULT') {
       return;
     }
-    const waiter = this.pending.get(message.transferId);
+    const transferId = message.transferId;
+    const outcome = { ok: message.ok === true,
+      reason: message.reason };
+    // 先入回执缓存，再尝试解析 waiter：
+    // 即使 waiter 已超时，回执也不丢失。
+    this.receipts.set(transferId, outcome);
+    const waiter = this.pending.get(transferId);
     if (!waiter) return;
     clearTimeout(waiter.timer);
-    this.pending.delete(message.transferId);
-    waiter.resolve(message.ok === true, message.reason);
+    this.pending.delete(transferId);
+    waiter.resolve(outcome.ok, outcome.reason);
+  }
+
+  // 已到达的回执（超时后仍可查询）。
+  getReceipt(transferId: string):
+  { ok: boolean; reason?: string } | undefined {
+    return this.receipts.get(transferId);
   }
 
   cancel(transferId: string): void {
@@ -83,11 +99,11 @@ export class BookTransferService {
     }
   }
 
-  private buildAppParam(bundleName: string,
-    fingerprint: string): wearEngine.P2pAppParam {
+  private buildAppParam(peer: { bundleName: string;
+    fingerprint: string }): wearEngine.P2pAppParam {
     const appInfo: wearEngine.AppInfo = {
-      bundleName: bundleName,
-      fingerprint: fingerprint
+      bundleName: peer.bundleName,
+      fingerprint: peer.fingerprint
     };
     return { remoteApp: appInfo };
   }
@@ -113,7 +129,9 @@ export class BookTransferService {
     });
   }
 
-  // sendFile: transferFile 回调上报进度。
+  // transferFile：回调可能多次上报进度。
+  // 句柄只在终态（错误或传输完成）关闭，
+  // 进度回调不得关闭（P1-9）。
   private transferFile(device: TargetDevice,
     appParam: wearEngine.P2pAppParam,
     filePath: string,
@@ -122,12 +140,27 @@ export class BookTransferService {
     const p2pFile: wearEngine.P2pFile = {
       file: fs.openSync(filePath, fs.OpenMode.READ_ONLY)
     };
+    let settled = false;
     return new Promise<void>((resolve, reject) => {
+      const settle = (error?: Error): void => {
+        if (settled) return;
+        settled = true;
+        try {
+          fs.closeSync(p2pFile.file);
+        } catch (closeError) {
+          hilog.warn(0x0000, TAG, 'close failed');
+        }
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      };
       this.p2pClient.transferFile(device.randomId,
         appParam, p2pFile, (error, result) => {
           try {
             if (error) {
-              reject(new Error('transfer failed: ' +
+              settle(new Error('transfer failed: ' +
                 error.code));
               return;
             }
@@ -135,20 +168,21 @@ export class BookTransferService {
               onPercent(result.progress);
             }
             if (result && result.code === 0) {
-              resolve();
+              // 终态：回调报成功。是否还有后续进度
+              // 回调以 SDK 实际行为为准（待验证）。
+              settle(undefined);
             }
-          } finally {
-            try {
-              fs.closeSync(p2pFile.file);
-            } catch (closeError) {
-              hilog.warn(0x0000, TAG, 'close failed');
-            }
+          } catch (callbackError) {
+            settle(callbackError instanceof Error ?
+              callbackError : new Error('callback failed'));
           }
         });
     });
   }
 
-  private waitForResult(transferId: string,
+  // P1-10：在任何发送之前注册 waiter，
+  // 手表快速回执也不会丢失。
+  private registerWaiter(transferId: string,
     timeoutMs: number): Promise<{ ok: boolean;
       reason?: string }> {
     return new Promise((resolve) => {
@@ -170,8 +204,9 @@ export class BookTransferService {
   }
 
   // 发送一本书。重试只包裹可恢复阶段（超时/对端不可用）。
+  // peer 必须是对端（手表）身份，不能是本机身份。
   async sendBook(book: BookMeta, device: TargetDevice,
-    bundleName: string, fingerprint: string,
+    peer: { bundleName: string; fingerprint: string },
     callbacks: TransferCallbacks,
     retry: number = MAX_RETRY): Promise<boolean> {
     const transferId = newTransferId();
@@ -183,17 +218,22 @@ export class BookTransferService {
       percent: 0,
       message: '正在连接 ' + device.name
     };
+    // P1-10：先注册 waiter，再发送任何消息，
+    // 手表快速回执也不会丢失。
+    const resultPromise = this.registerWaiter(
+      transferId, RESULT_TIMEOUT_MS);
     this.update(callbacks, progress);
 
-    // 目标前提：远端应用已安装。
+    // 目标前提：远端应用已安装（用对端身份校验）。
     let installed = false;
     try {
       installed = await this.deviceService
-        .isRemoteAppInstalled(device, bundleName);
+        .isRemoteAppInstalled(device, peer.bundleName);
     } catch (e) {
       installed = false;
     }
     if (!installed) {
+      this.pending.delete(transferId);
       progress.state = TransferState.FAILED;
       progress.error = 'E_PEER_UNAVAILABLE';
       progress.message = '手表端未安装素阅或未配对';
@@ -201,12 +241,12 @@ export class BookTransferService {
       return false;
     }
 
-    const appParam = this.buildAppParam(bundleName,
-      fingerprint);
+    const appParam = this.buildAppParam(peer);
 
     let attempt = 0;
     while (attempt <= retry) {
       if (this.cancelled.has(transferId)) {
+        this.pending.delete(transferId);
         progress.state = TransferState.CANCELLED;
         progress.message = '已取消';
         this.update(callbacks, progress);
@@ -257,9 +297,9 @@ export class BookTransferService {
         progress.message = '等待手表校验回执';
         progress.percent = 100;
         this.update(callbacks, progress);
-        const result = await this.waitForResult(
-          transferId, RESULT_TIMEOUT_MS);
+        const result = await resultPromise;
         if (this.cancelled.has(transferId)) {
+          this.pending.delete(transferId);
           progress.state = TransferState.CANCELLED;
           progress.message = '已取消';
           this.update(callbacks, progress);
@@ -289,6 +329,7 @@ export class BookTransferService {
         this.update(callbacks, progress);
       } catch (error) {
         if (attempt > retry) {
+          this.pending.delete(transferId);
           progress.state = TransferState.FAILED;
           progress.error = 'E_PEER_UNAVAILABLE';
           progress.message = '传输失败：' +
@@ -301,6 +342,7 @@ export class BookTransferService {
         this.update(callbacks, progress);
       }
     }
+    this.pending.delete(transferId);
     progress.state = TransferState.FAILED;
     progress.error = 'E_TIMEOUT';
     progress.message = '超过最大重试次数';

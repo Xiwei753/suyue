@@ -26,7 +26,10 @@ export default {
     lineHeightRatio: 1.55,
     theme: 'night',
     crown: false,
-    isBusy: true
+    isBusy: true,
+    // 设置收进二级交互（P2-13）：主操作
+    // 只保留上页/下页，避免控件互相挤占。
+    settingsOpen: false
   },
   onInit() {
     this.history = [];
@@ -128,6 +131,10 @@ export default {
   // 切换日间/夜间主题（仅配色，不影响排版）。
   toggleTheme() {
     this.theme = this.theme === 'night' ? 'day' : 'night';
+  },
+  // 展开/收起设置行（字号、主题）。
+  toggleSettings() {
+    this.settingsOpen = !this.settingsOpen;
   },
   backToLibrary() {
     router.back();

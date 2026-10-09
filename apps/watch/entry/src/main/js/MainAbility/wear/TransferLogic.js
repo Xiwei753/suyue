@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 传输协议纯逻辑（无 HarmonyOS 依赖，Node 可测）：
 // BOOK_META 校验、块接收（幂等、按序）、拼接、摘要核验。
-import { sha256Bytes } from '../util/Sha256.js';
+import { sha256Bytes, createSha256 } from '../util/Sha256.js';
 
 var HEX_RE = /^[0-9a-f]{64}$/;
 
@@ -119,4 +119,29 @@ export function assembleBytes(state) {
 
 export function verifyDigest(bytes, expectedSha256) {
   return sha256Bytes(bytes) === expectedSha256;
+}
+
+// 文件通道流式校验：按窗口喂入，峰值内存
+// 只有一个窗口（施工单 P1-11）。
+export function createDigestVerifier(expectedSha256) {
+  var hasher = createSha256();
+  var total = 0;
+  return {
+    update: function (bytes) {
+      hasher.update(bytes);
+      total += bytes.length;
+    },
+    finish: function (expectedBytes) {
+      if (typeof expectedBytes === 'number' &&
+          total !== expectedBytes) {
+        return { ok: false, reason: 'E_SIZE_MISMATCH' };
+      }
+      return hasher.digest() === expectedSha256
+        ? { ok: true }
+        : { ok: false, reason: 'E_DIGEST_MISMATCH' };
+    },
+    received: function () {
+      return total;
+    }
+  };
 }

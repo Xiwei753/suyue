@@ -37,6 +37,9 @@
   flex-direction: row;
   justify-content: space-around;
 }
+/* 主操作行（上页/设置/下页）与二级
+   设置行（A-/主题/A+）均不超过
+   正文区 316px 宽度。 */
 .nav {
   width: 70px;
   color: #e8edf5;

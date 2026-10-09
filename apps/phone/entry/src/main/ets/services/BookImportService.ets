@@ -12,6 +12,12 @@ import { importEpub, EpubChapter } from './EpubImportService';
 import { BookRepository } from './BookRepository';
 
 const READ_CHUNK = 1024 * 1024;
+// 导入上限：保护手表端内存与传输时长。
+// 超过一律明确拒绝，不进入书库。
+const MAX_BOOK_BYTES = 32 * 1024 * 1024;
+// 消息通道后备分块大小（文件通道优先发送，
+// 此值只用于 BOOK_META 的分块描述）。
+const MESSAGE_CHUNK_BYTES = 64 * 1024;
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const hash = cryptoFramework.createHash('SHA256');
@@ -25,7 +31,7 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return hex;
 }
 
-// 分块读取授权 URI 的全部字节。
+// 分块读取授权 URI 的全部字节；超过上限立即拒绝。
 // 待验证：DocumentViewPicker 返回的 URI 在重启后是否仍可打开；
 // 导入流程内立即读取，避免依赖持久化授权。
 export function readUriBytes(uri: string): Uint8Array {
@@ -38,8 +44,12 @@ export function readUriBytes(uri: string): Uint8Array {
       const read = fileIo.readSync(file.fd, buf.buffer,
         { offset: total, length: READ_CHUNK });
       if (read <= 0) break;
-      chunks.push(buf.subarray(0, read));
       total += read;
+      if (total > MAX_BOOK_BYTES) {
+        throw new Error('文件超过导入上限（' +
+          MAX_BOOK_BYTES + ' 字节）');
+      }
+      chunks.push(buf.subarray(0, read));
     }
   } finally {
     fileIo.closeSync(file.fd);
@@ -83,6 +93,37 @@ function writeNormalizedFile(path: string, bytes: Uint8Array): void {
   }
 }
 
+// 回读沙箱内已写入的文件（用于导入复核）。
+function readFileBytes(path: string): Uint8Array {
+  const file = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    const stat = fileIo.statSync(path);
+    const size = stat.size;
+    let pos = 0;
+    while (pos < size) {
+      const len = Math.min(READ_CHUNK, size - pos);
+      const buf = new Uint8Array(len);
+      const read = fileIo.readSync(file.fd, buf.buffer,
+        { offset: pos, length: len });
+      if (read <= 0) break;
+      chunks.push(buf.subarray(0, read));
+      total += read;
+      pos += read;
+    }
+  } finally {
+    fileIo.closeSync(file.fd);
+  }
+  const out = new Uint8Array(total);
+  let pos = 0;
+  for (const c of chunks) {
+    out.set(c, pos);
+    pos += c.length;
+  }
+  return out;
+}
+
 function utf8Bytes(text: string): Uint8Array {
   return new util.TextEncoder().encode(text);
 }
@@ -123,9 +164,6 @@ export async function importBook(context: common.UIAbilityContext,
     return { ok: false, reason: '文件为空' };
   }
 
-  const digest = await sha256Hex(raw);
-  const bookId = newBookId(digest, '');
-
   try {
     let title: string;
     let chapters: Array<{ title: string; offset: number; length: number }>;
@@ -150,13 +188,32 @@ export async function importBook(context: common.UIAbilityContext,
       title = epub.title;
     }
 
+    // P0-4：摘要与 bookId 必须基于实际发送/落盘的
+    // normalized 字节，而不是原始 TXT/EPUB 文件。
+    const digest = await sha256Hex(normalized);
+    const bookId = newBookId(digest, title);
+
     const repository = new BookRepository(context);
     const booksDir = context.filesDir + '/books';
     fileIo.mkdirSync(booksDir, true);
     const filePath = booksDir + '/' + bookId + '.txt';
     writeNormalizedFile(filePath, normalized);
 
+    // 写后复核：回读文件，确认字节数与摘要一致。
+    const onDisk = readFileBytes(filePath);
+    if (onDisk.length !== normalized.length) {
+      return { ok: false,
+        reason: '导入复核失败：磁盘字节数与正文不符' };
+    }
+    const diskDigest = await sha256Hex(onDisk);
+    if (diskDigest !== digest) {
+      return { ok: false,
+        reason: '导入复核失败：磁盘摘要与正文不符' };
+    }
+
     const now = Date.now();
+    const chunks = Math.max(1, Math.ceil(
+      normalized.length / MESSAGE_CHUNK_BYTES));
     const meta: BookMeta = {
       bookId,
       title,
@@ -165,6 +222,8 @@ export async function importBook(context: common.UIAbilityContext,
       bytes: normalized.length,
       sha256: digest,
       chapters,
+      chunks,
+      chunkBytes: MESSAGE_CHUNK_BYTES,
       importedAt: now,
       updatedAt: now,
       status: BookStatus.READY

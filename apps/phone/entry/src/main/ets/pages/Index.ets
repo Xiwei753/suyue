@@ -12,15 +12,23 @@ import { wearEngine } from '@kit.WearEngine';
 import { BookMeta, BookStatus } from '../model/BookModels';
 import { TargetDevice, TransferProgress,
   TransferState } from '../model/TransferModels';
+import { WATCH_PEER, PHONE_SELF,
+  isConfigured } from '../model/PeerIdentity';
+import { loadPeerIdentities } from '../services/PeerIdentityLoader';
 import { importBook } from '../services/BookImportService';
 import { BookRepository } from '../services/BookRepository';
 import { WearDeviceService } from '../services/WearDeviceService';
 import { BookTransferService } from '../services/BookTransferService';
 
-// 包名保留历史命名；指纹必须与手表 supportLists
-// 一致。证书指纹属于签名材料，不写进公开仓库：
-// 从签名配置/安全存储读取，未配置时发送明确禁用。
-const BUNDLE_NAME = 'com.xiwei753.gt4reader.phone';
+// 双端身份严格分离（P0-1/P0-2）：
+//   WATCH_PEER：对端 GT 4 身份，作为
+//     remoteApp 用于发送与回执校验；
+//   PHONE_SELF：本机身份，仅供手表校验
+//     消息来源。两者指纹独立注入，互不
+//     代替。指纹为空时发送明确禁用。
+// 指纹由 CI 从 Secrets 注入
+// （services/PeerIdentityConfig.g.ets），
+// 不写死、不提交假值。
 
 @Entry
 @Component
@@ -37,7 +45,6 @@ struct Index {
   private repository: BookRepository | null = null;
   private deviceService: WearDeviceService | null = null;
   private transferService: BookTransferService | null = null;
-  private phoneFingerprint: string = '';
 
   private getRepository(): BookRepository {
     if (this.repository === null) {
@@ -60,6 +67,7 @@ struct Index {
   }
 
   onPageShow(): void {
+    loadPeerIdentities();
     this.refresh();
     this.refreshDevices();
   }
@@ -91,17 +99,20 @@ struct Index {
     this.selectedDevice = e;
     const device = this.devices[e];
     this.deviceStatus = '已选择：' + device.name;
-    if (this.phoneFingerprint.length === 0) {
-      this.deviceStatus += '；未配置手机签名指纹，' +
+    if (!isConfigured(WATCH_PEER)) {
+      this.deviceStatus += '；手表签名指纹未配置，' +
         '发送将保持禁用';
     }
     // 注册手表 → 手机的消息接收（RESULT 回执）。
-    if (this.phoneFingerprint.length > 0 &&
+    // remoteApp 必须是对端（手表）身份
+    // （P0-2），不能用手机自己的包名。
+    if (isConfigured(WATCH_PEER) &&
         this.transferService !== null) {
       try {
         await this.getDeviceService()
           .registerMessageReceiver(
-            device, BUNDLE_NAME, this.phoneFingerprint,
+            device, WATCH_PEER.bundleName,
+            WATCH_PEER.fingerprint,
             (message: wearEngine.P2pMessage) => {
               this.transferService!.onMessageFromWatch(
                 message.content);
@@ -169,13 +180,13 @@ struct Index {
 
   private canSend(): boolean {
     return this.selectedDevice >= 0 &&
-      this.phoneFingerprint.length > 0 &&
+      isConfigured(WATCH_PEER) &&
       !this.sending;
   }
 
   private async sendBook(book: BookMeta): Promise<void> {
     if (!this.canSend() || this.transferService === null) {
-      this.transferText = '发送不可用：请先选择设备并配置签名指纹';
+      this.transferText = '发送不可用：请先选择设备并配置手表指纹';
       return;
     }
     if (book.status !== BookStatus.READY) {
@@ -186,7 +197,7 @@ struct Index {
     this.sending = true;
     this.transferText = '正在发送《' + book.title + '》……';
     const ok = await this.transferService.sendBook(
-      book, device, BUNDLE_NAME, this.phoneFingerprint,
+      book, device, WATCH_PEER,
       {
         onProgress: (progress: TransferProgress) => {
           this.transferText = progress.message +

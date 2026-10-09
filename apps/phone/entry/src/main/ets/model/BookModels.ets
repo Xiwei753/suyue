@@ -32,8 +32,14 @@ export interface BookMeta {
   // 规范化后正文字节数（UTF-8 字节，非字符数）。
   bytes: number;
   // 规范化后正文的 SHA-256（十六进制小写），用于传输校验与重复导入识别。
+  // 注意：必须对实际发送的 normalized 字节计算，
+  // 不能对原始 TXT/EPUB 文件计算（施工单 P0-4）。
   sha256: string;
   chapters: BookChapter[];
+  // 消息通道分块模式参数（文件通道优先，
+  // 此为后备分块描述，施工单 P0-3）。
+  chunks: number;
+  chunkBytes: number;
   importedAt: number;
   updatedAt: number;
   status: BookStatus;

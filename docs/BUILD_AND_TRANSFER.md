@@ -54,17 +54,76 @@
 | 4 | 手表多书书架 + 接收校验 | 源码完成；SHA-256/接收逻辑 Node 互验；真机待验证 |
 | 5 | 手机 Wear Engine 发送 | 源码完成（API 形状按华为示例）；真机互通待验证 |
 | 6 | 圆屏阅读体验 | 源码完成；分页回归扩展通过；表冠明确不支持（待 SDK 核对） |
+| 复核轮 | issue #1 第二轮施工单修复 | 源码完成；新增 tests/watch_receive.test.mjs 端到端互验；真机/HAP 仍待验证 |
+
+### 第二轮修复明细（issue #1 复核施工单）
+
+**P0（传书闭环）**
+1. 双端身份分离：`apps/phone/.../model/PeerIdentity.ets`
+   定义 `PHONE_SELF` 与 `WATCH_PEER`；指纹经 CI 生成
+   `PeerIdentityConfig.g.ets` / 手表侧 `PhonePeerConfig.g.js`
+   注入，空指纹明确禁用发送，不接受假值。
+2. 手机 `remoteApp` 一律使用手表身份
+   （`com.xiwei753.gt4reader.watch`），不再把手机包名
+   当对端。
+3. `BookMeta` 补 `chunks`/`chunkBytes`，导入时按
+   64 KiB 消息通道分块描述填齐。
+4. 摘要与 `bookId` 对**规范化后的正文字节**计算
+   （原来误用原始 TXT/EPUB 字节），写入后回读复核
+   字节数与摘要。
+5. 手表文件通道真正落地：Wear Engine 送达文件 →
+   `file.copy` 拷入本应用 `temp/<transferId>` →
+   大小校验 → 流式 SHA-256（64 KiB 窗口）→ 原子入库
+   → 失败删除暂存且不入书架。
+6. 手表 RESULT/ACK/RESUME 全部经唯一响应通道
+   `wearengine.sendMsg` 回手机；文件通道完成同样回
+   RESULT；`tests/watch_receive.test.mjs` 验证
+   BOOK_META → 落盘 → SHA256 → 书架登记 → RESULT
+   全链路（Node 层面）。
+
+**P1（传输/构建/数据可靠性）**
+7. 两个 workflow：签名材料写入 `$RUNNER_TEMP` 跨
+   step 持久（旧实现 `trap` 在本 step 末尾即删除，
+   构建 step 读不到）；`tools/inject_signing.py` 生成
+   真实 `signingConfigs` 并注入对端指纹；结束步骤
+   `if: always()` 清理并 `git checkout` 还原。
+8. `tests/build_artifact_check.sh` 升级为容器级检查：
+   ZIP 魔数、`modules.json`/`config.json` 包名、
+   设备类型、buildMode 与文件名匹配；构建脚本先
+   `rm -rf entry/build`，按模式挑 HAP。
+9. `transferFile` 句柄只在终态（错误/完成）关闭，
+   进度回调不再关闭句柄。
+10. RESULT waiter 在任何发送之前注册，迟到回执入
+    有限缓存，`RESULT` 先于 `transferFile` 终态回调
+    也不丢失。
+11. 手机导入设 32 MiB 上限；手表侧摘要校验改为
+    流式（`createSha256`/`createDigestVerifier`），
+    峰值内存只有一个 64 KiB 窗口。
+12. `LibraryIndex` 原子写（`books.json.tmp` → move）、
+    写操作串行化、写失败回滚上一份索引并删除孤儿
+    书籍文件。
+
+**P2（阅读器与界面）**
+13. 阅读器主操作行只保留「上页/设置/下页」，字号与
+    主题收进二级展开行，不再互相挤占。
+14. 旧演示书迁移条件化：仅当 `demo.txt` 确实存在且
+    移动成功才登记，元数据为真实字节数与摘要；用户
+    清空书库后绝不自动重造。
+15. 表冠保持诚实的不支持声明，待 SDK 核对后做真机
+    绑定。
 
 **仍阻断真机验收的环境**：自托管 `hmos-deveco` runner、
 `WATCH_SIGNING_MATERIAL`/`PHONE_SIGNING_MATERIAL`
 Secrets、GT 4 46mm 与 Pocket 2 真机、Wear Engine
-文件通道回调字段核对、手机签名指纹配置。
+文件通道回调字段名（`data.file`）真机核对、双端证书
+指纹的 CI 配置。
 
 ## 现有源码不能直接认定兼容的地方
 
 - `apps/watch/build-profile.json5` 暂时采用轻智能手表示例的 `6.1.1(24)` 模板数值，但**没有确认为 GT 4 开发安装实际可用的版本**。
 - HML 页面的几何大小和字号尚未经真机校准；UTF-8 分页是估算字宽，不是字体像素测量。
-- `wear/WearReceiver.js` 有手机端签名指纹占位，若缺少有效配对将停用消息接收。
+- `wear/WearReceiver.js` 的手机指纹经 CI 注入（`PhonePeerConfig.g.js`），未注入时停用消息接收；`wearengine.sendMsg` 的参数形状以华为 Lite 示例为准，**待真机验证**。
+- 手表文件通道依赖 Wear Engine 回调给出的文件路径字段（实现按示例取 `data.file`），**字段名待真机核对**。
 - 目前只有 Node 测试（`tests/`）。Node 通过不代表 Lite JS 编译器/ArkTS 编译器通过，也不代表 Wear Engine 真机互通。
 - 两套应用包名保留历史命名，以避免与签名注册和传输配置脱节。
 
