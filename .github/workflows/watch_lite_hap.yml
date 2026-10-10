@@ -116,7 +116,7 @@ jobs:
             --mode debug \
             --expect-fingerprint "$PHONE_FP"
 
-      - name: Verify HAP signature with hap-sign-tool
+      - name: Verify actual delivered BIN signature with hap-sign-tool
         # 证书签名验证：本步失败即失败，不能用
         # 「ZIP/清单检查」代替（P1-6）。
         env:
@@ -136,10 +136,25 @@ jobs:
             echo "未做证书签名验证的构建不能标记为成功。" >&2
             exit 1
           fi
+          # HDEA 解开 HAP 后只传 .bin，必须验证交付文件自身的签名。
+          BIN="$RUNNER_TEMP/suyue-watch-verified.bin"
+          python3 - "${{ steps.hap.outputs.path }}" "$BIN" <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              files = z.infolist()
+              if (len(files) != 1 or not files[0].filename.endswith(".bin")
+                      or files[0].is_dir() or "/" in files[0].filename
+                      or "\\" in files[0].filename):
+                  raise ValueError("Lite signed HAP must contain exactly one root .bin")
+              with open(sys.argv[2], "wb") as out:
+                  out.write(z.read(files[0]))
+          PY
           java -jar "$TOOL" verify-app \
-            -inFile "${{ steps.hap.outputs.path }}" \
+            -inForm bin \
+            -inFile "$BIN" \
             -outCertChain "$RUNNER_TEMP/verify.cer" \
             -outProfile "$RUNNER_TEMP/verify.p7b"
+          rm -f "$BIN" "$RUNNER_TEMP/verify.cer" "$RUNNER_TEMP/verify.p7b"
 
       - name: Report artifact identity
         run: |
