@@ -143,66 +143,121 @@ else
 fi
 
 # ---------- 签名 ----------
-echo "Signing $(basename "$IN") -> $(basename "$OUT")"
+# 关键区别：HDEA 对 Lite 单 bin HAP 先解压，然后**仅传内部 bin** 给手表。
+# 因此普通的 sign-app 默认 -inForm zip 只签外层 ZIP，手表收不到签名。
+# GT Lite 安装器 APPVERI_AppVerify() 校验的是收到的 .bin 本身。
+# 必须使用官方签名工具 -inForm bin 给内部 bin 签名，再装回单文件 ZIP。
+LITE_TMP=""
+SIGN_TARGET="$IN"
+if [ "$HAP_KIND" = "lite-bin" ]; then
+  LITE_TMP="$(mktemp -d "$WORK/.lite-sign.XXXXXXXX")"
+  trap 'if [ -n "$LITE_TMP" ]; then rm -rf "$LITE_TMP"; fi' EXIT
+  SIGN_TARGET="$LITE_TMP/unsigned.bin"
+  if ! python3 - "$IN" "$SIGN_TARGET" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    files = archive.infolist()
+    if (len(files) != 1 or not files[0].filename.endswith(".bin")
+            or "/" in files[0].filename or "\\" in files[0].filename
+            or files[0].is_dir()):
+        raise ValueError("Lite HAP must contain exactly one root .bin entry")
+    with open(sys.argv[2], "wb") as out:
+        out.write(archive.read(files[0]))
+PY
+  then
+    echo "ERROR: 提取 Lite 未签名 bin 失败。" >&2
+    exit 1
+  fi
+  SIGNED_TARGET="$LITE_TMP/signed.bin"
+  IN_FORM="bin"
+else
+  SIGNED_TARGET="$OUT"
+  IN_FORM="zip"
+fi
+
+echo "Signing $IN_FORM: $(basename "$IN") -> $(basename "$OUT")"
 java -jar "$TOOL" sign-app \
   -keyAlias "$ALIAS" \
   -signAlg SHA256withECDSA \
   -mode localSign \
   -appCertFile "$CER" \
   -profileFile "$PROFILE" \
-  -inFile "$IN" \
+  -inForm "$IN_FORM" \
+  -inFile "$SIGN_TARGET" \
   -keystoreFile "$P12" \
-  -outFile "$OUT" \
+  -outFile "$SIGNED_TARGET" \
   -keyPwd "$KEY_PWD" \
   -keystorePwd "$STORE_PWD" \
   2>&1 | sed -e "s|$KEY_PWD|<redacted>|g" -e "s|$STORE_PWD|<redacted>|g" | tail -3
-if [ ! -s "$OUT" ]; then
-  echo "ERROR: hap-sign-tool 报成功但没有产出 signed HAP。" >&2
+if [ ! -s "$SIGNED_TARGET" ]; then
+  echo "ERROR: hap-sign-tool 未输出签名后的 $IN_FORM。" >&2
   exit 1
 fi
 
-# ---------- 验签（必须真做，不能用 ZIP/清单检查代替）----------
-# -outCertChain 必须用 .cer 后缀：写成 .crt 会报
-# "Not support file: ...verify.crt"（本机实测）。
-echo "Verifying signature of $(basename "$OUT")"
+# ---------- 验签（在真正交给手表的文件上进行）----------
+# -outCertChain 必须是 .cer 后缀；单 bin 不能拿外层 ZIP 验签替代。
+echo "Verifying signature of $IN_FORM payload"
 if ! java -jar "$TOOL" verify-app \
-    -inFile "$OUT" \
+    -inForm "$IN_FORM" \
+    -inFile "$SIGNED_TARGET" \
     -outCertChain "$WORK/.verify.cer" \
     -outProfile "$WORK/.verify.p7b" > "$WORK/.verify.log" 2>&1; then
-  echo "ERROR: verify-app 失败，签名未通过校验——拒绝标记为成功。" >&2
+  echo "ERROR: verify-app -inForm $IN_FORM 未通过；拒绝发布。" >&2
   tail -5 "$WORK/.verify.log" >&2
   exit 1
 fi
 if ! grep -q 'verify-app success' "$WORK/.verify.log"; then
-  echo "ERROR: verify-app 没有报告 success——拒绝标记为成功。" >&2
+  echo "ERROR: verify-app 没有报告 success；拒绝发布。" >&2
   tail -5 "$WORK/.verify.log" >&2
   exit 1
 fi
-# Lite 单 bin 的签名只能增加签名信息，不得修改包内文件形状或原始 bin。
-# 如果签名工具把 ZIP 改成多条目，HDEA 依然会说 "not one standard hap"。
+
 if [ "$HAP_KIND" = "lite-bin" ]; then
-  if ! python3 - "$IN" "$OUT" <<'PY'
-import hashlib, sys, zipfile
-def extract(hap):
-    with zipfile.ZipFile(hap) as z:
-        files = z.infolist()
-        if len(files) != 1 or not files[0].filename.endswith(".bin"):
-            raise ValueError("signed Lite HAP must contain exactly one .bin")
-        if "/" in files[0].filename or "\\" in files[0].filename:
-            raise ValueError("single .bin must be at the HAP root")
-        data = z.read(files[0])
-        return files[0].filename, hashlib.sha256(data).digest()
-if extract(sys.argv[1]) != extract(sys.argv[2]):
-    raise ValueError("signing modified the Lite .bin payload")
-print("LITE_BIN_SIGNED_OK: exactly one unchanged .bin")
+  # 把已验签的 bin 装回 ZIP。ZIP 恰好一个 bin；名称、压缩方式沿用原包。
+  # 验证输入和输出 bin **必须不同**，确保没再把未签名 bin 发到手表。
+  # 完全不对 ZIP 再做签名，因为 HDEA 不会把 ZIP 的签名块传到手表。
+  if ! python3 - "$IN" "$SIGNED_TARGET" "$OUT" <<'PY'
+import hashlib, os, sys, zipfile
+original, signed_bin, output = sys.argv[1:]
+with zipfile.ZipFile(original) as src:
+    items = src.infolist()
+    if len(items) != 1 or items[0].is_dir() or not items[0].filename.endswith(".bin"):
+        raise ValueError("input HAP is not a single-bin archive")
+    item = items[0]
+    old_bytes = src.read(item)
+with open(signed_bin, "rb") as f:
+    signed_bytes = f.read()
+if not signed_bytes or old_bytes == signed_bytes:
+    raise ValueError("bin signing did not change the unsigned payload")
+part = output + ".part"
+try:
+    with zipfile.ZipFile(part, "w") as dest:
+        dest.writestr(item, signed_bytes)
+    with zipfile.ZipFile(part) as check:
+        files = check.infolist()
+        if len(files) != 1 or files[0].filename != item.filename:
+            raise ValueError("output lost the one-bin structure")
+        if check.read(files[0]) != signed_bytes:
+            raise ValueError("repack corrupted signed bin")
+    os.replace(part, output)
+finally:
+    if os.path.exists(part):
+        os.unlink(part)
+print("LITE_BIN_SIGNED_OK: one changed, verified signed .bin inside HAP")
+print("SIGNED_BIN_SHA256=" + hashlib.sha256(signed_bytes).hexdigest())
 PY
   then
-    echo "ERROR: 签名后单 bin 的内容或布局发生变化，拒绝发布。" >&2
+    echo "ERROR: 签名后的 bin 重打包失败，拒绝发布。" >&2
+    rm -f "$OUT"
     exit 1
   fi
 fi
 
+if [ ! -s "$OUT" ]; then
+  echo "ERROR: 未生成最终 signed HAP。" >&2
+  exit 1
+fi
 grep -E 'Digest verify result|verify:' "$WORK/.verify.log" \
-  | sed 's/^[0-9-]* [0-9:.]* *INFO - //'
+  | sed 's/^[0-9-]* [0-9:.]* *INFO - //' || true
 rm -f "$WORK/.verify.cer" "$WORK/.verify.p7b" "$WORK/.verify.log"
 echo "SIGNED_HAP=$OUT"
