@@ -42,14 +42,30 @@
 7. 手表注册接收、校验大小/摘要，安全落盘并更新书架，成功后由手表回执，不能只凭手机侧回调就认定入库成功。
 
 手机端打包：`tools/build_phone_hap.sh` + `.github/workflows/phone_hap.yml`
-（自托管 `hmos-deveco` runner，签名材料经 Secrets 注入）。**目前尚未在任何环境实际运行该流程，未产出 HAP。**
+（自托管 `hmos-deveco` runner，签名材料经 Secrets 注入）。
+
+本机实测（Local，非 CI）：Stage 工程此前**从未编译通过**（177 个 ArkTS
+错误），现已修复并产出签名 HAP；并用 hdc 无线调试装进真机：
+
+```text
+hdc tconn <phone>:46857          -> Connect OK
+hdc install -r <signed.hap>      -> install bundle successfully
+设备：LEM-AL00（Pocket 2），API 26，7.0.0.109(SP6C00E105R6P2)
+启动：aa start -a EntryAbility -b com.xiwei.suyue -> start ability successfully
+```
+
+启动后界面正常渲染（「素阅 / 手机书库 · 配套 GT 4 46mm」、
+「导入书籍」「书架（0 本）」「发送到 GT 4」三张卡片）。
+「发送到 GT 4」显示 `设备发现失败：Wear Engine 不可用`——本轮**未注入
+手表指纹**（本机构建用的是空指纹占位），按设计此时传书处于禁用状态，
+不是传书已打通。**双端互通仍未验证。**
 
 ## 实施状态（auto-issue-1 分支）
 
 | 阶段 | 内容 | 状态 |
 | --- | --- | --- |
-| 1 | GT4 Lite 工程 + HAP 打包/CI | 源码完成；无 DevEco 环境，未产出 HAP |
-| 2 | 手机 TXT/EPUB 导入沙箱 | 源码完成；Node 验证 ZIP/inflate；DevEco 编译待做 |
+| 1 | GT4 Lite 工程 + HAP 打包/CI | 本机已真实编译并签名（215,318 字节 `signed=yes`）；CI runner 仍缺；GT4 实机未装 |
+| 2 | 手机 TXT/EPUB 导入沙箱 | 本机已真实编译并签名（153,467 字节 `signed=yes`），已装进 Pocket 2 实机启动；导入流程本身未在真机点过 |
 | 3 | 传输协议 v0 + 示例 + 测试 | 完成；tests/protocol.test.mjs 通过 |
 | 4 | 手表多书书架 + 接收校验 | 源码完成；SHA-256/接收逻辑 Node 互验；真机待验证 |
 | 5 | 手机 Wear Engine 发送 | 源码完成（API 形状按华为示例）；真机互通待验证 |
