@@ -1,12 +1,39 @@
-# GT 4 46mm 安装与构建说明（已编译并签名，未实机安装）
+# GT 4 46mm 安装与构建说明（Debug 单 bin 正在实机验证）
 
-> 状态（issue #2 更新）：**手表 Lite 工程已在本机真实编译并签名成功**，
-> 产出 `entry-default-release-signed.hap`（215,323 字节），`signed=yes`，
-> `verify-app` 报 `Digest verify result: true` / `verify: Verify success`；
-> 包内嵌的是手表自己的 profile（`bundle-name: con.xiwei.suyue.gt4`，
-> 授权设备含 GT 4 的 UDID）。
-> 但**从未在 GT 4 上安装**——签名有效不等于设备接受安装。
-> 第 1 阶段验收：**暂不通过**，剩下的阻断只有真机安装与运行验证。
+> **2026-10-10 最新状态（Issue #2）：暂不可关闭。**
+> - 旧的 `entry-default-release-signed.hap` 虽曾通过官方 `verify-app`，但
+>   **HDEA 在手机端就报 `not one standard hap`**；不能再作为 GT4 安装包。
+> - 用户新实测 `tools/build_watch_lite.sh debug`：hvigor 确实生成
+>   `entry-default-unsigned.hap`，ZIP 顶层**恰好一个
+>   `entry-default-unsigned.bin`**，符合已反编译的 HDEA 文件形状判断；
+>   然而旧签名/校验工具只认 ZIP 顶层 `config.json`，因此未产生可安装的
+>   已签名 Debug 包。未签名尝试出现“安装失败 10，内部错误”，**根因尚未证实**。
+> - 现已修复 `tools/sign_hap.sh` 和 `tests/build_artifact_check.sh`：
+>   对单 bin 模式根据**本次构建的源码 config.json**核对包名及设备类型，
+>   保持 profile 包名一致；完成 `sign-app`、`verify-app` 后再检查
+>   已签 HAP ZIP **仍然只有原来那一个 .bin，且其 SHA-256 未变化**。
+>   多文件 HAP 仍必须从**包内**读取 config/module.json。
+> - **源码级 CI 测试通过 ≠ 手表端安装成功**。必须本地真实签名生成
+>   `entry-default-debug-signed.hap`，然后经同一 nova 7 Pro/HDEA 实测。
+
+## 最新调试步骤
+
+```bash
+tools/build_watch_lite.sh debug
+```
+
+脚本会清理旧手表构建、构建 Debug 单 bin、读取本次源码清单校验
+`con.xiwei.suyue.gt4` 与手表 Debug Profile 的包名一致、
+执行 `hap-sign-tool sign-app` 和 `verify-app`，并确认签名后
+**单 bin 的数量、文件名、内容摘要均未变化**。
+签名材料放在 `signing/shared/` 与 `signing/watch/`，不提交仓库。
+**没有签名材料会明确失败退出，不再给出可误用的成功结论。**
+
+安装时只选 `apps/watch/entry/build/default/outputs/default/entry-default-debug-signed.hap`，
+不要选 `entry-default-unsigned.hap` 或旧 Release 包。若仍报内部错误 10，
+要结合新的 HDEA logcat 和真实 Debug 产物区分**手机包解析/签名/手表安装**环节。
+由于单 bin 内没有顶层 manifest，这一模式下的源码包名、指纹检查
+不能宣称已从 bin 实际解出身份；签名验证与真机验证仍是独立关卡。
 
 ## 前置条件
 
@@ -47,13 +74,13 @@
 ## 本地构建（已验证）
 
 ```bash
-tools/build_watch_lite.sh release    # 或 debug
+tools/build_watch_lite.sh debug      # 当前 GT4 真机调试首选
 ```
 
 脚本要求 `hvigorw` 存在于 PATH；缺失时明确报错退出，不会把 Node
 静态检查伪装成构建成功。构建成功后输出 HAP 路径、大小与 SHA-256。
 
-**新包名的实测结果（`tools/build_watch_lite.sh release`）**：
+**旧 Release 多文件包的历史验签结果（已证实 HDEA 不识别；不得当作当前可安装包）**：
 
 ```text
 Signing entry-default-unsigned.hap -> entry-default-release-signed.hap
@@ -130,8 +157,8 @@ type        : debug
 
 ## 已知未决
 
-- `targetSdkVersion` / `compatibleSdkVersion` 的 `6.1.1(24)` 来自轻智能手表示例模板，
-  **尚未确认为 GT 4 开发安装实际可用的版本**；需在真实 DevEco 环境中核对。
+- `targetSdkVersion` = `5.1.0(18)`、`compatibleSdkVersion` = `4.0.0(10)`
+  已参照 Lite 示例调整，但**尚未经 GT4 真机确认适配**。
 - Wear Engine 接收依赖手机端证书指纹，尚未配置（见 `wear/PeerConfig.js`）。
 - **真机安装与运行尚未做**：签名通过只证明 HAP 完整、证书链有效、
   包名与 profile 一致。设备端还会校验该 UDID 是否在授权列表、有效期与
