@@ -54,6 +54,14 @@ if [ "$MAGIC" != "504b0304" ]; then
   exit 1
 fi
 
+# HAP 安装器最终需要读取完整归档，不能仅靠 PK 魔数与
+# 单个清单项就当整个 ZIP 无损。这里逐项解压并校验 CRC，
+# 提前拦下传输截断、损坏或目录记录异常的产物。
+if ! unzip -tqq "$HAP" >/dev/null 2>&1; then
+  echo "FAIL: HAP ZIP full extraction/CRC test failed: $HAP" >&2
+  exit 1
+fi
+
 # 2) 模块清单存在。实测三种叫法都要认：
 #      module.json  —— Stage HAP（本仓库手机端；内含 app + module）
 #      modules.json —— 部分 HSP/旧打包
