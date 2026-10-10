@@ -21,6 +21,8 @@ ALIAS=""
 KEY_PWD=""
 STORE_PWD=""
 TOOL=""
+SOURCE_MANIFEST=""  # Lite 单 .bin 容器无顶层 config.json，必须绑定本次源码清单
+HAP_KIND="unknown"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -34,6 +36,7 @@ while [ $# -gt 0 ]; do
     --key-pwd) KEY_PWD="$2"; shift 2 ;;
     --store-pwd) STORE_PWD="$2"; shift 2 ;;
     --tool) TOOL="$2"; shift 2 ;;
+    --source-manifest) SOURCE_MANIFEST="$2"; shift 2 ;;
     *) echo "sign_hap.sh: 未知参数 $1" >&2; exit 2 ;;
   esac
 done
@@ -69,19 +72,50 @@ print((c.get("bundle-info") or {}).get("bundle-name", ""))
 ' "$PROFILE_JSON" 2>/dev/null)"
   fi
   rm -f "$PROFILE_JSON"
-  # 清单名随模型不同：Lite/FA 用 config.json，Stage 用 module.json
-  # （两者都是 app.bundleName）。只认 config.json 会把 Stage HAP 的
-  # 包名读成空，从而误判为"不一致"而拒绝签名。
-  HAP_BUNDLE="$(python3 -c '
+  # 普通 Stage/Lite 多文件 HAP 直接读归档内 manifest；
+  # legacy Lite debug 的 HAP 顶层可能只有一个 *.bin，不能据此把包名认作空。
+  # 仅对严格单 .bin 结构，允许从**同一次构建**的源码 config.json
+  # 交叉核对包名与 deviceType。这是源码身份校验，不谎称从 bin 反解出包名。
+  if ! HAP_IDENTITY="$(python3 - "$IN" "$SOURCE_MANIFEST" <<'PY'
 import json, sys, zipfile
-with zipfile.ZipFile(sys.argv[1]) as z:
-    names = set(z.namelist())
-    for cand in ("config.json", "module.json"):
-        if cand in names:
-            d = json.loads(z.read(cand).decode("utf-8"))
-            print((d.get("app") or {}).get("bundleName", ""))
-            break
-' "$IN" 2>/dev/null)"
+hap, source = sys.argv[1:]
+with zipfile.ZipFile(hap) as z:
+    names = [item.filename for item in z.infolist() if not item.is_dir()]
+    lite_bin = (len(names) == 1 and names[0].endswith(".bin")
+                and "/" not in names[0] and "\\" not in names[0])
+    if lite_bin:
+        if not source:
+            raise ValueError("Lite single-bin HAP requires --source-manifest")
+        with open(source, encoding="utf-8") as f:
+            d = json.load(f)
+        if "liteWearable" not in (d.get("module", {}).get("deviceType") or []):
+            raise ValueError("source manifest is not a Lite Wearable manifest")
+        kind = "lite-bin"
+    else:
+        d = None
+        for cand in ("config.json", "module.json", "modules.json"):
+            if cand in names:
+                d = json.loads(z.read(cand).decode("utf-8"))
+                break
+        if d is None:
+            raise ValueError("HAP has no recognized manifest and is not a single-bin Lite HAP")
+        kind = "manifest"
+    bundle = (d.get("app") or {}).get("bundleName", "")
+    if not bundle:
+        raise ValueError("HAP/source manifest has no app.bundleName")
+    print(kind)
+    print(bundle)
+PY
+  )"; then
+    echo "ERROR: 无法确认 HAP 类型/包名；拒绝签名。" >&2
+    exit 3
+  fi
+  HAP_KIND="$(printf '%s\n' "$HAP_IDENTITY" | head -n 1)"
+  HAP_BUNDLE="$(printf '%s\n' "$HAP_IDENTITY" | tail -n 1)"
+  if [ "$HAP_KIND" = "lite-bin" ] && [ -z "$PROFILE_BUNDLE" ]; then
+    echo "ERROR: Lite 单 bin 包无法读取内嵌清单，必须成功解析 profile 包名才可签名。" >&2
+    exit 3
+  fi
   if [ -z "$PROFILE_BUNDLE" ]; then
     echo "WARN: 无法从 profile 解析 bundle-name，跳过包名预检。" >&2
   elif [ "$PROFILE_BUNDLE" != "$HAP_BUNDLE" ]; then
@@ -143,6 +177,30 @@ if ! grep -q 'verify-app success' "$WORK/.verify.log"; then
   tail -5 "$WORK/.verify.log" >&2
   exit 1
 fi
+# Lite 单 bin 的签名只能增加签名信息，不得修改包内文件形状或原始 bin。
+# 如果签名工具把 ZIP 改成多条目，HDEA 依然会说 "not one standard hap"。
+if [ "$HAP_KIND" = "lite-bin" ]; then
+  if ! python3 - "$IN" "$OUT" <<'PY'
+import hashlib, sys, zipfile
+def extract(hap):
+    with zipfile.ZipFile(hap) as z:
+        files = [x for x in z.infolist() if not x.is_dir()]
+        if len(files) != 1 or not files[0].filename.endswith(".bin"):
+            raise ValueError("signed Lite HAP must contain exactly one .bin")
+        if "/" in files[0].filename or "\\" in files[0].filename:
+            raise ValueError("single .bin must be at the HAP root")
+        data = z.read(files[0])
+        return files[0].filename, hashlib.sha256(data).digest()
+if extract(sys.argv[1]) != extract(sys.argv[2]):
+    raise ValueError("signing modified the Lite .bin payload")
+print("LITE_BIN_SIGNED_OK: exactly one unchanged .bin")
+PY
+  then
+    echo "ERROR: 签名后单 bin 的内容或布局发生变化，拒绝发布。" >&2
+    exit 1
+  fi
+fi
+
 grep -E 'Digest verify result|verify:' "$WORK/.verify.log" \
   | sed 's/^[0-9-]* [0-9:.]* *INFO - //'
 rm -f "$WORK/.verify.cer" "$WORK/.verify.p7b" "$WORK/.verify.log"
