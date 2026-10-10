@@ -19,6 +19,7 @@ import { importBook } from '../services/BookImportService';
 import { BookRepository } from '../services/BookRepository';
 import { WearDeviceService } from '../services/WearDeviceService';
 import { BookTransferService } from '../services/BookTransferService';
+import { authNotice, deviceNotice } from '../services/WearAuthPolicy';
 
 // 双端身份严格分离（P0-1/P0-2）：
 //   WATCH_PEER：对端 GT 4 身份，作为
@@ -41,6 +42,11 @@ struct Index {
   @State private selectedDevice: number = -1;
   @State private receiverReady: boolean = false;
   @State private deviceStatus: string = '未发现已连接的 GT 4';
+  // issue #5：授权状态与设备发现各自的提示与进行中标志。
+  @State private authStatus: string = '尚未检查 Wear Engine 授权状态';
+  @State private authGranted: boolean = false;
+  @State private authBusy: boolean = false;
+  @State private deviceBusy: boolean = false;
   @State private transferText: string = '未开始传输';
   @State private sending: boolean = false;
   // 当前在途 transferId（取消时用，P1-7）。
@@ -48,6 +54,9 @@ struct Index {
   private repository: BookRepository | null = null;
   private deviceService: WearDeviceService | null = null;
   private transferService: BookTransferService | null = null;
+  // 设备发现/授权的进度序号：只允许最后一次异步结果落地，
+  // 避免旧的 await 覆盖新状态（issue #5 P0-B）。
+  private refreshSeq: number = 0;
 
   private getRepository(): BookRepository {
     if (this.repository === null) {
@@ -77,27 +86,39 @@ struct Index {
     this.books = this.getRepository().list();
   }
 
-  // 设备发现：列出已连接设备，由用户选择，
-  // 不默认第一台。
+  // 设备发现（issue #5）：先查授权状态，再列设备；两者都保留
+  // 真实的 stage/code，不再一律归为“Wear Engine 不可用”。
+  // 空列表 = Wear Engine 未返回可用设备，不等于“未配对/蓝牙没连”。
   private async refreshDevices(): Promise<void> {
+    const seq = ++this.refreshSeq;
     this.receiverReady = false;
     const previous = this.devices[this.selectedDevice];
     if (previous) {
       await this.getDeviceService().unregisterMessageReceiver(previous);
     }
-    try {
-      const devices = await this.getDeviceService()
-        .listDevices();
-      this.devices = devices;
-      this.deviceStatus = devices.length > 0 ?
-        '发现 ' + devices.length + ' 台已连接设备，请选择目标' :
-        '未发现已连接的 GT 4（请确认配对与蓝牙）';
-      this.selectedDevice = -1;
-    } catch (e) {
-      this.devices = [];
-      this.deviceStatus = '设备发现失败：Wear Engine 不可用';
-      this.selectedDevice = -1;
-    }
+    this.deviceBusy = true;
+    const auth = await this.getDeviceService().queryAuthorization();
+    if (seq !== this.refreshSeq) return;
+    this.authGranted = auth.granted;
+    this.authStatus = authNotice(auth).text;
+    const result = await this.getDeviceService().listDevices();
+    if (seq !== this.refreshSeq) return;
+    this.deviceBusy = false;
+    this.devices = result.ok ? result.devices : [];
+    this.deviceStatus = deviceNotice(result).text;
+    this.selectedDevice = -1;
+  }
+
+  // 用户主动授权（issue #5 P0-A）：只在点击时请求，不自动弹窗；
+  // 拒绝/取消后也不循环弹窗，改为让用户手动重试。
+  private async requestAuth(): Promise<void> {
+    if (this.authBusy) return;
+    this.authBusy = true;
+    const result = await this.getDeviceService().requestAuthorization();
+    this.authBusy = false;
+    this.authGranted = result.granted;
+    this.authStatus = authNotice(result).text;
+    await this.refreshDevices();
   }
 
   private async selectDevice(e: number): Promise<void> {
@@ -353,6 +374,15 @@ struct Index {
       Column({ space: 8 }) {
         Text('发送到 GT 4').fontSize(22)
           .fontWeight(FontWeight.Medium).fontColor('#f2f2f2')
+        Text(this.authStatus).fontSize(13)
+          .fontColor(this.authGranted ? '#4ade80' : '#facc15')
+        if (!this.authGranted) {
+          Button(this.authBusy ? '授权中……' : '授权手表访问')
+            .fontSize(13)
+            .height(28)
+            .enabled(!this.authBusy)
+            .onClick(() => { this.requestAuth(); })
+        }
         Text(this.deviceStatus).fontSize(14).fontColor('#a7abb4')
         if (this.devices.length > 0) {
           Row() {
@@ -368,9 +398,10 @@ struct Index {
             }, (device: TargetDevice) => device.randomId)
           }
         }
-        Button('刷新设备')
+        Button(this.deviceBusy ? '发现中……' : '刷新设备')
           .fontSize(13)
           .height(28)
+          .enabled(!this.deviceBusy)
           .onClick(() => { this.refreshDevices(); })
         if (this.sending) {
           Button('取消发送')

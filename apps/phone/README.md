@@ -17,10 +17,17 @@
 - `services/BookRepository.ets`：`library.json` 索引，重启不丢书，
   重复导入幂等，删除同时清理索引与正文文件。
 - `model/BookModels.ets`：BookMeta/Chapter/Status 统一模型。
-- `services/WearDeviceService.ets`：Wear Engine 设备发现
-  （`getConnectedDevices`）、`isRemoteAppInstalled` 核对、
-  `registerMessageReceiver` 回执接收；设备由用户选择，
-  不默认第一台。
+- `services/WearDeviceService.ets`：Wear Engine 授权与设备发现。
+  授权用 `getAuthClient` → `getAuthorization` 查询、`requestAuthorization`
+  由用户显式授权（最小权限 `Permission.DEVICE_IDENTIFIER`）；发现用
+  `getConnectedDevices`，`isRemoteAppInstalled` 核对、
+  `registerMessageReceiver` 回执接收；设备由用户选择，不默认第一台。
+  授权/发现各自失败阶段与 `BusinessError.code` 结构化返回，
+  不再一律 `E_PEER_UNAVAILABLE`。
+- `services/WearAuthPolicy.js`：纯逻辑（无 SDK 依赖，Node 可测）：
+  错误码分类（1008500004 未申请服务 / 1008500005·201 未授权 /
+  1008500006 未同意隐私 / 401 参数非法 / 其它保留原始码）、
+  授权与发现的用户文案；「空列表」≠「未配对/蓝牙没连」。
 - `services/BookTransferService.ets`：按协议序列发送
   HELLO → BOOK_META → `transferFile` 文件通道 →
   等手表 RESULT；进度/取消/超时/重试（只重试可恢复
@@ -29,13 +36,17 @@
 - `model/TransferModels.ets`：传输进度/状态/错误码
   （与协议错误码对齐）。
 - `pages/Index.ets`：书架列表 + 设备选择 + 发送，
-  实时进度/失败提示；未选设备或未配置指纹时
-  发送禁用。
+  实时进度/失败提示；「发送到 GT 4」卡片先显示 Wear Engine
+  **授权状态**并提供「授权手表访问」入口，未授权/被拒/未审批/
+  空列表各自给出可区分文案；未选设备或未配置指纹时发送禁用。
 
 ## 未完成
 
-- Wear Engine 真机互通（GT 4 + Pocket 2）：设备发现、
-  签名指纹核对、`transferFile` 与回执时序均**待验证**。
+- Wear Engine 真机互通（GT 4 + Pocket 2）：**用户授权拉起**
+  （`requestAuthorization` 弹窗与结果）、设备发现、签名指纹核对、
+  `transferFile` 与回执时序均**待验证**。授权入口在素阅应用内
+  「发送到 GT 4」卡片，**不需要**（也找不到）走运动健康的
+  「设备能力开放 / 应用授权」入口。
 - 手机签名指纹读取（当前为空，发送保持禁用）。
 - 在 Pocket 2 上编译、签名、安装与真机验证（当前没有编译产物）。
 - GBK 解码在目标系统的实际可用性属于**待验证**项。

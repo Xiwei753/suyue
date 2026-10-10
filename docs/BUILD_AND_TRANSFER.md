@@ -37,7 +37,7 @@
 3. EPUB：`ZipReader`（纯 JS inflate，含穿越/bomb/CRC 防护）+
    `EpubImportService` 按 OPF/spine 顺序清洗章节；仅无 DRM。
 4. `BookRepository` 维护 `library.json` 索引，重启不丢书。
-5. 用 [Wear Engine Kit 手机侧 ArkTS API](https://developer.huawei.com/consumer/cn/doc/doccenter-references/api/wearengine_api) 做设备发现与授权（阶段 5，尚未实现）。
+5. 用 [Wear Engine Kit 手机侧 ArkTS API](https://developer.huawei.com/consumer/cn/doc/doccenter-references/api/wearengine_api) 做设备发现与授权：`getAuthClient` → `getAuthorization` 查询、`requestAuthorization` 由用户显式授权（最小权限 `Permission.DEVICE_IDENTIFIER`），再 `getConnectedDevices` 发现设备；授权与发现各自失败阶段/错误码结构化上报（阶段 5，源码完成，真机待验证）。授权入口在素阅应用内，**不依赖**运动健康的授权入口。
 6. 将书籍规范化、写入临时文件，调用手机侧 `P2pClient.transferFile`；也可使用 `sendMessage` 发送控制/ACK 消息。API 支持并不保证当前 GT 4 配对与签名权限已经打通。
 7. 手表注册接收、校验大小/摘要，安全落盘并更新书架，成功后由手表回执，不能只凭手机侧回调就认定入库成功。
 
@@ -56,9 +56,11 @@ hdc install -r <signed.hap>      -> install bundle successfully
 
 启动后界面正常渲染（「素阅 / 手机书库 · 配套 GT 4 46mm」、
 「导入书籍」「书架（0 本）」「发送到 GT 4」三张卡片）。
-「发送到 GT 4」显示 `设备发现失败：Wear Engine 不可用`——本轮**未注入
-手表指纹**（本机构建用的是空指纹占位），按设计此时传书处于禁用状态，
-不是传书已打通。**双端互通仍未验证。**
+「发送到 GT 4」曾显示 `设备发现失败：Wear Engine 不可用`——这是 issue #5 之前的旧文案
+（把「空列表 / 异常」一律当成「Wear Engine 不可用」）。现已改为：先显示 Wear Engine
+**授权状态**并提供「授权手表访问」入口，未授权 / 被拒 / 未审批 / 空列表分别给出可区分
+文案与错误码（`WearAuthPolicy.js` 分类）。本轮仍**未注入手表指纹**，按设计传书处于
+禁用状态，不是传书已打通。**双端互通仍未验证。**
 
 ## 实施状态（auto-issue-1 分支）
 
@@ -68,7 +70,7 @@ hdc install -r <signed.hap>      -> install bundle successfully
 | 2 | 手机 TXT/EPUB 导入沙箱 | 本机已真实编译并签名（153,467 字节 `signed=yes`），已装进 Pocket 2 实机启动；导入流程本身未在真机点过 |
 | 3 | 传输协议 v0 + 示例 + 测试 | 完成；tests/protocol.test.mjs 通过 |
 | 4 | 手表多书书架 + 接收校验 | 源码完成；SHA-256/接收逻辑 Node 互验；真机待验证 |
-| 5 | 手机 Wear Engine 发送 | 源码完成（API 形状按华为示例）；真机互通待验证 |
+| 5 | 手机 Wear Engine 发送 | 授权(`getAuthClient`/`requestAuthorization`)+发现+结构化错误码已实现（issue #5）；真机互通待验证 |
 | 6 | 圆屏阅读体验 | 源码完成；分页回归扩展通过；表冠明确不支持（待 SDK 核对） |
 | 复核轮 | issue #1 第二轮施工单修复 | 源码完成；新增 tests/watch_receive.test.mjs 端到端互验；真机/HAP 仍待验证 |
 | 复核轮 2 | issue #1 第三轮施工单修复 | 源码完成；新增 waiter/索引/注入三类失败回归；HAP 与真机仍阻断 |
