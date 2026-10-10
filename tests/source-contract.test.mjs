@@ -340,6 +340,12 @@ for (const wf of [watchWf, phoneWf]) {
 }
 assert.ok(existsSync('tools/inject_signing.py'),
   'signing injection helper must exist');
+// 手机端和手表端属于同一 Issue 分支开发，不能让 phone CI
+// 只监听已结束的 auto-issue-1，否则 auto-issue-2 的变更永远不打包。
+assert.ok(phoneWf.includes("branches: [main, 'auto-issue-*']"),
+  'phone Stage CI must run on current issue branches');
+assert.ok(phoneWf.includes('.harmony-cli/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar'),
+  'phone signing verification must find the actual HarmonyOS CLI toolchain');
 
 // P1-8：HAP 检查必须验证容器/包名/设备/模式。
 const artifactCheck = read('tests/build_artifact_check.sh');

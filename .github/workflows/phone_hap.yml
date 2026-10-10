@@ -13,7 +13,7 @@ name: Phone Stage HAP build (self-hosted DevEco required)
 #     统一清理。
 on:
   push:
-    branches: [auto-issue-1, main]
+    branches: [main, 'auto-issue-*']
     paths:
       - 'apps/phone/**'
       - 'tools/build_phone_hap.sh'
@@ -79,6 +79,7 @@ jobs:
           TOOL="$HAP_SIGN_TOOL_JAR"
           if [ -z "$TOOL" ]; then
             for candidate in \
+              "$HOME/.harmony-cli/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar" \
               "$HOME/command-line-tools/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar" \
               /opt/deveco/toolchains/lib/hap-sign-tool.jar; do
               [ -f "$candidate" ] && TOOL="$candidate" && break
