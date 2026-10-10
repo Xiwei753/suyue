@@ -99,9 +99,11 @@ jobs:
           echo "size=$(stat -c%s "$HAP")" >> "$GITHUB_OUTPUT"
           echo "sha256=$(sha256sum "$HAP" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
-      - name: Verify manifest fingerprint inside the HAP
+      - name: Verify Lite single-bin layout and injected source identity
         # 不能把「JS 里有指纹」当「手表已授权接收」：
-        # 从打包后的清单再验证 supportLists（P0-1）。
+        # 单 .bin 调试 HAP 顶层没有 config.json：只核对注入后的源码清单，
+        # 不谎称已经从 .bin 中解出指纹；签名工具另行验证签名。
+        # 如果产物是普通 HAP，校验脚本仍核对包内清单。
         env:
           WATCH_SIGNING_MATERIAL: ${{ secrets.WATCH_SIGNING_MATERIAL }}
         run: |
@@ -110,6 +112,7 @@ jobs:
           tests/build_artifact_check.sh "${{ steps.hap.outputs.path }}" \
             --bundle con.xiwei.suyue.gt4 \
             --device liteWearable \
+            --source-manifest apps/watch/entry/src/main/config.json \
             --mode debug \
             --expect-fingerprint "$PHONE_FP"
 
