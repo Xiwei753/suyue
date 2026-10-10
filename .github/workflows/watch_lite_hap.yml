@@ -16,7 +16,7 @@ name: Watch Lite HAP build (self-hosted DevEco required)
 #   runner；GitHub 托管机装不了 Lite SDK。没有 runner 时 job 只会排队，
 #   不会失败——这不是"构建通过"，也不是"构建失败"，而是"从未运行"。
 #   在 runner 注册之前，第 1 阶段的真实构建证据只能来自本机
-#   `tools/build_watch_lite.sh release` 的日志与产物体积/SHA256。
+#   `tools/build_watch_lite.sh debug` 的日志与产物体积/SHA256。
 #
 # 签名材料（secrets.WATCH_SIGNING_MATERIAL，JSON）：
 #   storeFileB64/certpathB64/profileB64: base64 编码的签名文件
@@ -82,14 +82,16 @@ jobs:
         env:
           WATCH_SIGNING_DIR: ${{ runner.temp }}/suyue-signing
           HAP_SIGN_TOOL_JAR: ${{ vars.HAP_SIGN_TOOL_JAR }}
-        run: tools/build_watch_lite.sh release
+        # GT 4 真机调试采用 Debug profile，先构建与其匹配的 Debug HAP。
+        # Release 构建 + Debug profile 在旧版 DevEco Assistant 上尚未经实机验证。
+        run: tools/build_watch_lite.sh debug
 
       - name: Locate HAP
         id: hap
         run: |
-          HAP="$(find apps/watch/entry/build/default/outputs/default -name 'entry-default-release-*.hap' -type f | head -n 1)"
+          HAP="$(find apps/watch/entry/build/default/outputs/default -name 'entry-default-debug-signed.hap' -type f | head -n 1)"
           if [ -z "$HAP" ]; then
-            echo "ERROR: release HAP not found" >&2
+            echo "ERROR: signed debug HAP not found" >&2
             exit 1
           fi
           echo "path=$HAP" >> "$GITHUB_OUTPUT"
@@ -108,7 +110,7 @@ jobs:
           tests/build_artifact_check.sh "${{ steps.hap.outputs.path }}" \
             --bundle con.xiwei.suyue.gt4 \
             --device liteWearable \
-            --mode release \
+            --mode debug \
             --expect-fingerprint "$PHONE_FP"
 
       - name: Verify HAP signature with hap-sign-tool
