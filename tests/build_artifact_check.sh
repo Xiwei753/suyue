@@ -69,10 +69,10 @@ fi
 # 2) Manifest: 现代 HAP 是顶层 config.json / module.json；
 # legacy Lite Debug HAP 的 ZIP 可能只有 entry-default-unsigned.bin，
 # 不能把这种合法的调测助手容器误判为"清单缺失"。
-if [ "$DEVICE" = "liteWearable" ] && python3 - "$HAP" <<'PY'
+if [ "$DEVICE" = "liteWearable" ] && python3 - "$HAP" >/dev/null 2>&1 <<'PY'
 import sys, zipfile
 with zipfile.ZipFile(sys.argv[1]) as z:
-    files = [x.filename for x in z.infolist() if not x.is_dir()]
+    files = [x.filename for x in z.infolist()]
     assert len(files) == 1 and files[0].endswith(".bin")
     assert "/" not in files[0] and "\\" not in files[0]
 PY
