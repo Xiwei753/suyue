@@ -13,10 +13,18 @@ import { TargetDevice } from '../model/TransferModels';
 
 const TAG = 'suyue/WearDeviceService';
 
+// 注销必须提供与注册时相同的 appParam 和 callback，不能只传设备 ID。
+interface MessageRegistration {
+  appParam: wearEngine.P2pAppParam;
+  callback: Callback<wearEngine.P2pMessage>;
+}
+
 export class WearDeviceService {
   private deviceClient: wearEngine.DeviceClient;
   private p2pClient: wearEngine.P2pClient;
   private context: Context;
+  private messageRegistrations: Map<string, MessageRegistration> =
+    new Map<string, MessageRegistration>();
 
   constructor(context: common.UIAbilityContext) {
     this.context = context;
@@ -74,15 +82,22 @@ export class WearDeviceService {
     const appParam: wearEngine.P2pAppParam = {
       remoteApp: appInfo
     };
+    // 切换到同一设备的新回调之前，先注销旧订阅，避免重复接收回执。
+    await this.unregisterMessageReceiver(device);
     await this.p2pClient.registerMessageReceiver(
       device.randomId, appParam, callback);
+    this.messageRegistrations.set(device.randomId,
+      { appParam: appParam, callback: callback });
   }
 
   async unregisterMessageReceiver(
     device: TargetDevice): Promise<void> {
+    const registered = this.messageRegistrations.get(device.randomId);
+    if (!registered) return;
     try {
       await this.p2pClient.unregisterMessageReceiver(
-        device.randomId);
+        device.randomId, registered.appParam, registered.callback);
+      this.messageRegistrations.delete(device.randomId);
     } catch (error) {
       hilog.warn(0x0000, TAG, 'unregister failed');
     }

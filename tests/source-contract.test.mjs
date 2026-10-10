@@ -357,7 +357,18 @@ assert.ok(artifactCheck.includes('deviceTypes'),
   'artifact check must verify the device type');
 assert.ok(artifactCheck.includes('buildMode'),
   'artifact check must verify the build mode');
+const transferCode = read('apps/phone/entry/src/main/ets/services/BookTransferService.ets');
+assert.ok(transferCode.includes('await this.p2pClient.sendMessage('),
+  'phone must await asynchronous Wear Engine message delivery');
+assert.ok(transferCode.includes('wearEngine.P2pResultCode.COMMUNICATION_SUCCESS') &&
+  !transferCode.includes('result.code === 0'),
+  'file transfer completion must use Huawei success enum, not numeric zero');
+const wearDeviceCode = read('apps/phone/entry/src/main/ets/services/WearDeviceService.ets');
+assert.ok(wearDeviceCode.includes('registered.appParam, registered.callback'),
+  'unsubscribe must reuse the registered appParam and callback');
 const phoneShelf = read('apps/phone/entry/src/main/ets/pages/Index.ets');
+assert.ok(phoneShelf.includes('this.receiverReady'),
+  'sending must be disabled if RESULT receiver registration failed');
 assert.ok(phoneShelf.includes('private canTransferBook(') &&
   phoneShelf.includes('BookStatus.SENT') &&
   phoneShelf.includes('BookStatus.TRANSFER_FAILED') &&

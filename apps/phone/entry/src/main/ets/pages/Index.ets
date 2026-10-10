@@ -39,6 +39,7 @@ struct Index {
   @State private busy: boolean = false;
   @State private devices: TargetDevice[] = [];
   @State private selectedDevice: number = -1;
+  @State private receiverReady: boolean = false;
   @State private deviceStatus: string = '未发现已连接的 GT 4';
   @State private transferText: string = '未开始传输';
   @State private sending: boolean = false;
@@ -81,6 +82,11 @@ struct Index {
   // 设备发现：列出已连接设备，由用户选择，
   // 不默认第一台。
   private async refreshDevices(): Promise<void> {
+    this.receiverReady = false;
+    const previous = this.devices[this.selectedDevice];
+    if (previous) {
+      await this.getDeviceService().unregisterMessageReceiver(previous);
+    }
     try {
       const devices = await this.getDeviceService()
         .listDevices();
@@ -98,8 +104,13 @@ struct Index {
 
   private async selectDevice(e: number): Promise<void> {
     if (e < 0 || e >= this.devices.length) return;
-    this.selectedDevice = e;
+    const previous = this.devices[this.selectedDevice];
     const device = this.devices[e];
+    if (previous && previous.randomId !== device.randomId) {
+      await this.getDeviceService().unregisterMessageReceiver(previous);
+    }
+    this.receiverReady = false;
+    this.selectedDevice = e;
     this.deviceStatus = '已选择：' + device.name;
     if (!isConfigured(WATCH_PEER)) {
       this.deviceStatus += '；手表签名指纹未配置，' +
@@ -119,6 +130,7 @@ struct Index {
               this.transferService!.onMessageFromWatch(
                 message.content);
             });
+        this.receiverReady = true;
       } catch (error) {
         this.deviceStatus += '；消息接收注册失败';
       }
@@ -182,6 +194,7 @@ struct Index {
 
   private canSend(): boolean {
     return this.selectedDevice >= 0 &&
+      this.receiverReady &&
       isConfigured(WATCH_PEER) &&
       !this.sending;
   }
@@ -196,7 +209,8 @@ struct Index {
 
   private async sendBook(book: BookMeta): Promise<void> {
     if (!this.canSend() || this.transferService === null) {
-      this.transferText = '发送不可用：请先选择设备并配置手表指纹';
+      this.transferText =
+        '发送不可用：请先选择设备、配置指纹并成功注册回执';
       return;
     }
     if (!this.canTransferBook(book)) {

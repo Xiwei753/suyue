@@ -149,25 +149,23 @@ export class BookTransferService {
     return { remoteApp: appInfo };
   }
 
-  private sendMessage(device: TargetDevice,
+  private async sendMessage(device: TargetDevice,
     appParam: wearEngine.P2pAppParam,
     payload: object): Promise<void> {
     const message: wearEngine.P2pMessage = {
       content: this.encoder.encodeInto(
         JSON.stringify(payload))
     };
-    return new Promise<void>((resolve, reject) => {
-      try {
-        // 华为示例中 sendMessage 无回调（void）；
-        // 抛错即失败。精确的异步语义待真机验证。
-        this.p2pClient.sendMessage(device.randomId,
-          appParam, message);
-        resolve();
-      } catch (error) {
-        reject(new Error('send failed: ' +
-          (error && error.code)));
-      }
-    });
+    // Wear Engine 的 sendMessage 返回 Promise<P2pResult>。
+    // 必须等真正发送结束：旧写法调用后直接 resolve，
+    // 异步失败也会被误判成成功，导致直接开始文件传输。
+    const result = await this.p2pClient.sendMessage(
+      device.randomId, appParam, message);
+    if (result && result.code !== undefined &&
+        result.code !==
+          wearEngine.P2pResultCode.COMMUNICATION_SUCCESS) {
+      throw new Error('sendMessage code ' + result.code);
+    }
   }
 
   // transferFile：回调可能多次上报进度。
@@ -207,27 +205,39 @@ export class BookTransferService {
           resolve();
         }
       };
-      this.p2pClient.transferFile(device.randomId,
-        appParam, p2pFile, (error, result) => {
-          try {
-            if (error) {
-              settle(new Error('transfer failed: ' +
-                error.code));
-              return;
+      try {
+        this.p2pClient.transferFile(device.randomId,
+          appParam, p2pFile, (error, result) => {
+            try {
+              if (error) {
+                settle(new Error('transfer failed: ' +
+                  error.code));
+                return;
+              }
+              if (result && typeof result.progress === 'number') {
+                onPercent(result.progress);
+              }
+              // Wear Engine 的成功码不是 0，而是
+              // P2pResultCode.COMMUNICATION_SUCCESS（当前 SDK 为 207）。
+              // code 缺失代表进度通知，不能提前关闭文件句柄。
+              if (result && result.code !== undefined) {
+                if (result.code ===
+                    wearEngine.P2pResultCode.COMMUNICATION_SUCCESS) {
+                  settle(undefined);
+                } else {
+                  settle(new Error('transfer result code ' +
+                    result.code));
+                }
+              }
+            } catch (callbackError) {
+              settle(callbackError instanceof Error ?
+                callbackError : new Error('callback failed'));
             }
-            if (result && typeof result.progress === 'number') {
-              onPercent(result.progress);
-            }
-            if (result && result.code === 0) {
-              // 终态：回调报成功。是否还有后续进度
-              // 回调以 SDK 实际行为为准（待验证）。
-              settle(undefined);
-            }
-          } catch (callbackError) {
-            settle(callbackError instanceof Error ?
-              callbackError : new Error('callback failed'));
-          }
-        });
+          });
+      } catch (callError) {
+        settle(callError instanceof Error ? callError :
+          new Error('transferFile call failed'));
+      }
     });
   }
 
