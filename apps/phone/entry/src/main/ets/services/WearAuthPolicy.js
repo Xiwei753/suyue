@@ -16,6 +16,8 @@ export const STAGE_TEXT = {
   auth_client: 'Wear Engine 客户端创建',
   auth_query: '授权状态查询',
   auth_request: '授权申请',
+  device_client: 'Wear Engine 设备客户端创建',
+  p2p_client: 'Wear Engine P2P 客户端创建',
   device_query: '设备发现'
 };
 
@@ -66,7 +68,8 @@ export function describeWearError(stage, code, message) {
   }
   if (n === 1008500005) {
     return { stage: stage, code: n, kind: 'not_authorized',
-      text: '尚未授权手表访问（1008500005），请点击「授权手表访问」' };
+      text: '华为账号未授权该数据权限（1008500005）；本应用传书无需该权限，' +
+        '如出现请检查华为侧授权' };
   }
   if (n === 1008500006) {
     return { stage: stage, code: n, kind: 'privacy_not_agreed',
@@ -104,7 +107,7 @@ export function authNotice(auth) {
   }
   if (auth.ok === true && auth.granted !== true) {
     return { kind: 'not_authorized', code: 0,
-      text: '尚未授权手表访问，请点击「授权手表访问」' };
+      text: '尚未授权手表数据权限（本应用传书无需，如出现请检查华为侧授权）' };
   }
   return describeWearError(auth.stage, auth.code, auth.message);
 }
@@ -124,4 +127,22 @@ export function deviceNotice(result) {
         '且运动健康已连接；空列表不等于未配对）' };
   }
   return describeWearError(result.stage, result.code, result.message);
+}
+
+// 一轮设备刷新的纯异步流程（issue #5 第二轮 P0-2b / P0-3）。
+// 页面通过 deps 注入：start()（开启一轮并返回序号，同时置“进行中”）、
+// isCurrent(seq)（该轮是否仍是最新）、listDevices()（可能 throw）、
+// apply(result)（落地结果）、end()（复位“进行中”）。
+// 保证：无论成功、异常还是被更新的一轮取代，只要该轮仍是当前轮次，
+// “进行中”标志都一定会被复位（配合页面的 try/finally 语义）。
+export async function runDeviceRefresh(deps) {
+  const seq = deps.start();
+  try {
+    const result = await deps.listDevices();
+    if (!deps.isCurrent(seq)) return { superseded: true };
+    deps.apply(result);
+    return { superseded: false, result: result };
+  } finally {
+    if (deps.isCurrent(seq)) deps.end();
+  }
 }
