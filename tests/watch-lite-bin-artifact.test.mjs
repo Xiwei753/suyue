@@ -6,6 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+// Syntax checks are valuable here because signing is executed on the user's
+// machine; a source-only CI job cannot sign without the private profile.
+for (const script of ['tools/sign_hap.sh', 'tools/build_watch_lite.sh',
+  'tests/build_artifact_check.sh']) {
+  const r = spawnSync('bash', ['-n', script], { encoding: 'utf8' });
+  assert.equal(r.status, 0, script + ': ' + r.stderr);
+}
+
 const root = mkdtempSync(join(tmpdir(), 'suyue-lite-bin-'));
 const signed = join(root, 'entry-default-debug-signed.hap');
 const source = join(root, 'config.json');
