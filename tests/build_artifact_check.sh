@@ -99,40 +99,65 @@ else
   MANIFEST_TEXT="$(unzip -p "$HAP" "$MANIFEST" 2>/dev/null)"
 fi
 
-# 3) 包名。
-if [ -n "$BUNDLE" ]; then
-  case "$MANIFEST" in
-    module.json|modules.json)
-      if ! printf '%s' "$MANIFEST_TEXT" | grep -q "\"app\":[^}]*\"bundleName\"[[:space:]]*:[[:space:]]*\"$BUNDLE\""; then
-        echo "FAIL: HAP bundleName != $BUNDLE ($MANIFEST): $HAP" >&2
-        exit 1
-      fi
-      ;;
-    config.json)
-      if ! printf '%s' "$MANIFEST_TEXT" | grep -q "\"bundleName\"[[:space:]]*:[[:space:]]*\"$BUNDLE\""; then
-        echo "FAIL: HAP bundleName != $BUNDLE ($MANIFEST): $HAP" >&2
-        exit 1
-      fi
-      ;;
-  esac
+# 3)+4) 包名 / 目标设备类型。
+#     用 JSON 解析，而不是逐行 grep：manifest（尤其源码 config.json）
+#     常是格式化多行 JSON，"deviceType"/"deviceTypes" 与其取值
+#     （如 "liteWearable"）往往各自独占一行；grep 逐行匹配会漏判，
+#     曾把合法的 Lite 单 bin HAP 误判成 deviceType 不匹配。
+#     bundleName 位于 app.bundleName；设备类型位于
+#     module.deviceTypes（Stage）或 module.deviceType（legacy/Lite）。
+if ! IDENTITY="$(MANIFEST_JSON="$MANIFEST_TEXT" python3 - <<'PY'
+import json, os, sys
+try:
+    data = json.loads(os.environ.get("MANIFEST_JSON", ""))
+except Exception as exc:
+    sys.stderr.write("manifest is not valid JSON: %s\n" % exc)
+    sys.exit(3)
+
+def collect(obj, key, out):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == key:
+                out.append(v)
+            collect(v, key, out)
+    elif isinstance(obj, list):
+        for item in obj:
+            collect(item, key, out)
+
+bundles, devices = [], []
+collect(data, "bundleName", bundles)
+collect(data, "deviceTypes", devices)
+if not devices:
+    collect(data, "deviceType", devices)
+flat = []
+for v in devices:
+    if isinstance(v, list):
+        flat.extend(v)
+    else:
+        flat.append(v)
+print("BUNDLE\t" + "\t".join(str(x) for x in bundles))
+print("DEVICES\t" + "\t".join(str(x) for x in flat))
+PY
+)"; then
+  echo "FAIL: cannot parse HAP manifest as JSON ($MANIFEST): $HAP" >&2
+  exit 1
 fi
 
-# 4) 目标设备类型。
+MANIFEST_BUNDLES="$(printf '%s\n' "$IDENTITY" | awk -F'\t' '$1 == "BUNDLE" { for (i = 2; i <= NF; i++) print $i }')"
+MANIFEST_DEVICES="$(printf '%s\n' "$IDENTITY" | awk -F'\t' '$1 == "DEVICES" { for (i = 2; i <= NF; i++) print $i }')"
+
+if [ -n "$BUNDLE" ]; then
+  if ! printf '%s\n' "$MANIFEST_BUNDLES" | grep -qxF "$BUNDLE"; then
+    echo "FAIL: HAP bundleName != $BUNDLE ($MANIFEST): $HAP" >&2
+    exit 1
+  fi
+fi
+
 if [ -n "$DEVICE" ]; then
-  case "$MANIFEST" in
-    module.json|modules.json)
-      if ! printf '%s' "$MANIFEST_TEXT" | grep -q "\"deviceTypes\"[^]]*\"$DEVICE\""; then
-        echo "FAIL: HAP deviceTypes does not include $DEVICE: $HAP" >&2
-        exit 1
-      fi
-      ;;
-    config.json)
-      if ! printf '%s' "$MANIFEST_TEXT" | grep -q "\"deviceType\"[^]]*\"$DEVICE\""; then
-        echo "FAIL: HAP deviceType does not include $DEVICE: $HAP" >&2
-        exit 1
-      fi
-      ;;
-  esac
+  if ! printf '%s\n' "$MANIFEST_DEVICES" | grep -qxF "$DEVICE"; then
+    echo "FAIL: HAP deviceType does not include $DEVICE ($MANIFEST): $HAP" >&2
+    exit 1
+  fi
 fi
 
 # 5) buildMode 与文件名匹配：release
