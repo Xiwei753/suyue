@@ -160,6 +160,7 @@ if [ -n "$SIGN_P12" ] || [ -n "$SIGN_CER" ] || [ -n "$SIGN_PROFILE" ]; then
     --in "$HAP" \
     --out "$SIGNED_HAP" \
     --bundle 'con.xiwei.suyue.gt4' \
+    --source-manifest "$REPO_ROOT/apps/watch/entry/src/main/config.json" \
     --p12 "$SIGN_P12" \
     --cer "$SIGN_CER" \
     --profile "$SIGN_PROFILE" \
@@ -183,6 +184,7 @@ if [ -n "$SIGN_P12" ] || [ -n "$SIGN_CER" ] || [ -n "$SIGN_PROFILE" ]; then
 不要用别的应用的 profile 顶替。
 ========================================================================
 MSG
+    exit 3
   else
     exit "$SIGN_STATUS"
   fi
@@ -191,6 +193,7 @@ fi
 "$REPO_ROOT/tests/build_artifact_check.sh" \
   "$REPO_ROOT/apps/watch/$HAP" \
   --bundle 'con.xiwei.suyue.gt4' \
+  --source-manifest "$REPO_ROOT/apps/watch/entry/src/main/config.json" \
   --device liteWearable \
   --mode "$MODE"
 
@@ -213,4 +216,5 @@ entry-default-<mode>-signed.hap。
 本轮构建成功 ≠ 第 1 阶段验收通过。
 ========================================================================
 MSG
+  exit 1
 fi
