@@ -138,7 +138,8 @@ MSG
     exit 1
   fi
 else
-  echo "WARN: 没有 python3，跳过 profile 包名预检。" >&2
+  echo "ERROR: 没有 python3，无法验证 HAP/profile 身份；拒绝签名。" >&2
+  exit 1
 fi
 
 # ---------- 签名 ----------
