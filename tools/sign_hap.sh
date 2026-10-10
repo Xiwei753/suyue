@@ -168,6 +168,13 @@ PY
     echo "ERROR: 提取 Lite 未签名 bin 失败。" >&2
     exit 1
   fi
+  # 实际签名对象的身份来自 .bin 头部，不依赖未签名 HAP 外面的源码 JSON。
+  # 先挡掉包头残留 com.example.myapplication 的产物。
+  if ! python3 "$(dirname "$0")/check_lite_bin.py" \
+      --bin "$SIGN_TARGET" --bundle "$EXPECT_BUNDLE"; then
+    echo "ERROR: Lite BIN 实际包名异常，拒绝签名。" >&2
+    exit 3
+  fi
   SIGNED_TARGET="$LITE_TMP/signed.bin"
   IN_FORM="bin"
 else
@@ -213,6 +220,11 @@ if ! grep -q 'verify-app success' "$WORK/.verify.log"; then
 fi
 
 if [ "$HAP_KIND" = "lite-bin" ]; then
+  if ! python3 "$(dirname "$0")/check_lite_bin.py" \
+      --bin "$SIGNED_TARGET" --bundle "$EXPECT_BUNDLE"; then
+    echo "ERROR: 签名后 Lite BIN 真实包名或格式发生变化。" >&2
+    exit 1
+  fi
   # 把已验签的 bin 装回 ZIP。ZIP 恰好一个 bin；名称、压缩方式沿用原包。
   # 验证输入和输出 bin **必须不同**，确保没再把未签名 bin 发到手表。
   # 完全不对 ZIP 再做签名，因为 HDEA 不会把 ZIP 的签名块传到手表。
