@@ -151,14 +151,19 @@ if printf '%s' "$VERIFY" | grep -qi 'does not verify\|DOES NOT VERIFY'; then
   echo "FAIL: apksigner verify 报告签名校验未通过：$APK" >&2
   exit 1
 fi
+# apksigner 输出标签随 build-tools 版本变化：
+#   36.x: "Signer #1 certificate SHA-256 digest: <hex>"
+#   37.x: "V2 Signer: certificate SHA-256 digest: <hex>"
+# 用通用正则匹配，不绑死某一版本的标签（CI runner 用的是 37.0.0）。
 CERT_SHA256="$(printf '%s\n' "$VERIFY" \
-  | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1)"
+  | sed -n 's/^.*certificate SHA-256 digest: *//p' | head -n 1)"
 CERT_DN="$(printf '%s\n' "$VERIFY" \
-  | sed -n 's/^Signer #1 certificate DN: //p' | head -n 1)"
+  | sed -n 's/^.*certificate DN: *//p' | head -n 1)"
 if [ -z "$CERT_SHA256" ]; then
-  echo "FAIL: APK 未签名（apksigner 未读到 Signer #1 证书）。" >&2
+  echo "FAIL: APK 未签名（apksigner 未读到证书 SHA-256）。" >&2
   echo "      release 必须配置正式 keystore（SUYUE_ANDROID_KEYSTORE_* 环境变量）；" >&2
   echo "      debug 应被 Android 自动签名，未签名说明构建配置异常。" >&2
+  printf '%s\n' "$VERIFY" >&2
   exit 1
 fi
 SIGNED_STATE="yes"
