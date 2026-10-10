@@ -544,7 +544,7 @@ assert.ok(artifactCheck.includes('不做证书签名验证'),
 assert.ok(watchWf.includes('hap-sign-tool') &&
   phoneWf.includes('hap-sign-tool'),
   'both workflows must verify signatures with hap-sign-tool');
-assert.ok(artifactCheck.includes('note=container-and-manifest-check-only'),
+assert.ok(artifactCheck.includes('note=archive-check-not-device-install'),
   'artifact check output must be explicit about its scope');
 
 console.log('PASS: repo structure, watch JS routes, phone ' +
