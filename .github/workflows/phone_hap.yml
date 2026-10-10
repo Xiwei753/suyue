@@ -7,7 +7,7 @@ name: Phone Stage HAP build (self-hosted DevEco required)
 #   keyAlias/keyPassword/storePassword: 口令
 #   signAlg: 默认 SHA256withECDSA
 #   fingerprints: {"phone": 64位hex, "watch": 64位hex}
-#   —— 手表证书指纹注入手机侧 PeerIdentityConfig.g.ets，
+#   —— 手表证书指纹注入手机侧 PeerIdentityConfig.g.ts，
 #     作为 remoteApp 用于发送与回执校验。材料只在
 #     构建生命周期内存在，结束步骤（if: always()）
 #     统一清理。
@@ -50,7 +50,7 @@ jobs:
             --material-json "$PHONE_SIGNING_MATERIAL" \
             --signing-dir "$RUNNER_TEMP/suyue-signing" \
             --build-profile apps/phone/build-profile.json5 \
-            --identity-file apps/phone/entry/src/main/ets/services/PeerIdentityConfig.g.ets \
+            --identity-file apps/phone/entry/src/main/ets/services/PeerIdentityConfig.g.ts \
             --identity-var INJECTED_WATCH_FINGERPRINT \
             --fingerprint-key watch
 
@@ -115,5 +115,5 @@ jobs:
         run: |
           rm -rf "$RUNNER_TEMP/suyue-signing"
           git checkout -- apps/phone/build-profile.json5 \
-            apps/phone/entry/src/main/ets/services/PeerIdentityConfig.g.ets
+            apps/phone/entry/src/main/ets/services/PeerIdentityConfig.g.ts
           echo "signing material removed; configs restored"

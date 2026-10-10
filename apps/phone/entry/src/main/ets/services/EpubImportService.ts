@@ -4,6 +4,16 @@
 // 明确拒绝：加密/DRM EPUB、ZIP 路径穿越、超过上限的大包。
 import { ZipReader } from './ZipReader';
 
+// ZipReader 以构造函数 + prototype 实现（保持纯 JS，便于测试直接跑），
+// 所以它本身是值而非类型；这里声明实例的形状供本文件标注。
+interface ZipReaderInstance {
+  parseCentralDirectory(): void;
+  has(name: string): boolean;
+  names(): string[];
+  read(name: string): Uint8Array;
+  readText(name: string): string;
+}
+
 export interface EpubChapter {
   title: string;
   text: string;
@@ -73,7 +83,7 @@ function hrefJoin(base: string, href: string): string {
   return parts.join('/');
 }
 
-function findContainerRoot(zip: ZipReader): string {
+function findContainerRoot(zip: ZipReaderInstance): string {
   const xml = zip.readText('META-INF/container.xml');
   const m = /<rootfile[^>]+full-path\s*=\s*"([^"]+)"/i.exec(xml) ||
     /<rootfile[^>]+full-path\s*=\s*'([^']+)'/i.exec(xml);
@@ -81,7 +91,7 @@ function findContainerRoot(zip: ZipReader): string {
   return m[1];
 }
 
-function hasDrm(zip: ZipReader): boolean {
+function hasDrm(zip: ZipReaderInstance): boolean {
   for (const name of zip.names()) {
     const lower = name.toLowerCase();
     if (lower.includes('encryption') || lower.includes('rights') ||
@@ -154,7 +164,7 @@ function basename(path: string): string {
 }
 
 // 从 NCX（EPUB2）提取章节标题（尽力而为，缺省用文件名）。
-function chapterTitlesFromNav(zip: ZipReader, opfPath: string,
+function chapterTitlesFromNav(zip: ZipReaderInstance, opfPath: string,
   _manifest: Map<string, string>): Map<string, string> {
   const titles = new Map<string, string>();
   const opf = zip.readText(opfPath);

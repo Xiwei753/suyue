@@ -9,7 +9,7 @@
 //     自己的包名/指纹冒充。
 //
 // 指纹注入路径：CI 从 Secrets 生成
-// services/PeerIdentityConfig.g.ets（gitignore，
+// services/PeerIdentityConfig.g.ts（gitignore，
 // 不提交），本地未生成时指纹为空 —— 空指纹
 // 明确禁用发送/接收，不会以假值混过。
 export interface PeerIdentity {

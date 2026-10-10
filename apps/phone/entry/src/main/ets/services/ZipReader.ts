@@ -178,8 +178,8 @@ const CRC_TABLE = (function () {
   return table;
 })();
 
-export function crc32(bytes, crc) {
-  let c = (crc === undefined ? 0 : crc) ^ 0xffffffff;
+export function crc32(bytes, crc = 0) {
+  let c = crc ^ 0xffffffff;
   for (let i = 0; i < bytes.length; i++) {
     c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
   }
@@ -229,6 +229,9 @@ function readU32(data, pos) {
     (data[pos + 3] << 24)) >>> 0;
 }
 
+// 本文件必须保持**纯 JS**（不含 TS 专有语法）：
+// tests/zip_inflate.test.mjs 会把它原样复制成 .mjs 直接交给 Node 跑。
+// 因此实例的类型接口声明在 EpubImportService.ts 里，不放在这里。
 export function ZipReader(data, maxOutputBytes) {
   this.data = data;
   this.maxOutput = maxOutputBytes === undefined ? 64 * 1024 * 1024 : maxOutputBytes;

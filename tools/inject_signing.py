@@ -9,7 +9,7 @@ storeFile/certpath/profile + 别名/口令 + 双端
   1. 真实 signingConfigs 写入 build-profile.json5；
   2. 对端证书指纹写入身份配置文件
      （手表 PhonePeerConfig.g.js / 手机
-     PeerIdentityConfig.g.ets）；
+     PeerIdentityConfig.g.ts）；
   3. 手表 Manifest（config.json）中
      metaData.customizeData 的 supportLists
      占位符替换为真实手机指纹。

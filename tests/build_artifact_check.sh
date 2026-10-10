@@ -54,14 +54,18 @@ if [ "$MAGIC" != "504b0304" ]; then
   exit 1
 fi
 
-# 2) 模块清单存在（Stage: modules.json；
-#    Lite FA: config.json）。
-if unzip -l "$HAP" modules.json >/dev/null 2>&1; then
+# 2) 模块清单存在。实测三种叫法都要认：
+#      module.json  —— Stage HAP（本仓库手机端；内含 app + module）
+#      modules.json —— 部分 HSP/旧打包
+#      config.json  —— Lite FA（本仓库手表端）
+if unzip -l "$HAP" module.json >/dev/null 2>&1; then
+  MANIFEST="module.json"
+elif unzip -l "$HAP" modules.json >/dev/null 2>&1; then
   MANIFEST="modules.json"
 elif unzip -l "$HAP" config.json >/dev/null 2>&1; then
   MANIFEST="config.json"
 else
-  echo "FAIL: HAP contains neither modules.json nor config.json: $HAP" >&2
+  echo "FAIL: HAP contains no module.json / modules.json / config.json: $HAP" >&2
   exit 1
 fi
 
@@ -70,7 +74,7 @@ MANIFEST_TEXT="$(unzip -p "$HAP" "$MANIFEST" 2>/dev/null)"
 # 3) 包名。
 if [ -n "$BUNDLE" ]; then
   case "$MANIFEST" in
-    modules.json)
+    module.json|modules.json)
       if ! printf '%s' "$MANIFEST_TEXT" | grep -q "\"app\":[^}]*\"bundleName\"[[:space:]]*:[[:space:]]*\"$BUNDLE\""; then
         echo "FAIL: HAP bundleName != $BUNDLE ($MANIFEST): $HAP" >&2
         exit 1
@@ -88,7 +92,7 @@ fi
 # 4) 目标设备类型。
 if [ -n "$DEVICE" ]; then
   case "$MANIFEST" in
-    modules.json)
+    module.json|modules.json)
       if ! printf '%s' "$MANIFEST_TEXT" | grep -q "\"deviceTypes\"[^]]*\"$DEVICE\""; then
         echo "FAIL: HAP deviceTypes does not include $DEVICE: $HAP" >&2
         exit 1

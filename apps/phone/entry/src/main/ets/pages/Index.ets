@@ -27,7 +27,7 @@ import { BookTransferService } from '../services/BookTransferService';
 //     消息来源。两者指纹独立注入，互不
 //     代替。指纹为空时发送明确禁用。
 // 指纹由 CI 从 Secrets 注入
-// （services/PeerIdentityConfig.g.ets），
+// （services/PeerIdentityConfig.g.ts），
 // 不写死、不提交假值。
 
 @Entry
@@ -51,8 +51,7 @@ struct Index {
 
   private getRepository(): BookRepository {
     if (this.repository === null) {
-      const context = this.getUIContext().getHostContext()
-        as common.UIAbilityContext;
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       this.repository = new BookRepository(context);
     }
     return this.repository;
@@ -60,8 +59,7 @@ struct Index {
 
   private getDeviceService(): WearDeviceService {
     if (this.deviceService === null) {
-      const context = this.getUIContext().getHostContext()
-        as common.UIAbilityContext;
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       this.deviceService = new WearDeviceService(context);
       this.transferService = new BookTransferService(
         context, this.deviceService);
@@ -140,8 +138,7 @@ struct Index {
   private async chooseBook(): Promise<void> {
     if (this.busy) return;
     try {
-      const context = this.getUIContext().getHostContext()
-        as common.UIAbilityContext;
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       const documentPicker = new picker.DocumentViewPicker(context);
       const options = new picker.DocumentSelectOptions();
       const uris: Array<string> = await documentPicker.select(options);
@@ -173,7 +170,7 @@ struct Index {
 
   private async removeBook(book: BookMeta): Promise<void> {
     try {
-      await promptAction.showAlertDialog({
+      await promptAction.showDialog({
         title: '删除书籍',
         message: '确定删除《' + book.title + '》？此操作不可恢复。',
         buttons: [

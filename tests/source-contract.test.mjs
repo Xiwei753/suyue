@@ -31,11 +31,11 @@ assert.ok(existsSync('apps/phone/AppScope/resources/base/media/app_icon.png'));
 for (const svc of ['BookImportService', 'TextDecodeService',
   'EpubImportService', 'BookRepository', 'ZipReader',
   'WearDeviceService', 'BookTransferService']) {
-  assert.ok(existsSync('apps/phone/entry/src/main/ets/services/' + svc + '.ets'),
-    'phone service missing: ' + svc);
+  assert.ok(existsSync('apps/phone/entry/src/main/ets/services/' + svc + '.ts'),
+    'phone service missing (pure logic layer lives in .ts): ' + svc);
 }
-assert.ok(existsSync('apps/phone/entry/src/main/ets/model/BookModels.ets'));
-assert.ok(existsSync('apps/phone/entry/src/main/ets/model/TransferModels.ets'));
+assert.ok(existsSync('apps/phone/entry/src/main/ets/model/BookModels.ts'));
+assert.ok(existsSync('apps/phone/entry/src/main/ets/model/TransferModels.ts'));
 const phoneIndexFull = read('apps/phone/entry/src/main/ets/pages/Index.ets');
 assert.ok(phoneIndexFull.includes('listDevices'),
   'phone index must discover devices');
@@ -226,7 +226,7 @@ for (const file of watchJsFiles) {
 // P0-1/P0-2：双端身份分离，手机不得把
 // 自己的包名当 remoteApp。
 const peerIdentity = read(
-  'apps/phone/entry/src/main/ets/model/PeerIdentity.ets');
+  'apps/phone/entry/src/main/ets/model/PeerIdentity.ts');
 assert.ok(peerIdentity.includes('PHONE_SELF'),
   'PeerIdentity must define PHONE_SELF');
 assert.ok(peerIdentity.includes('WATCH_PEER'),
@@ -266,7 +266,7 @@ assert.ok(phoneIndexFull.includes('WATCH_PEER'),
 assert.ok(phoneIndexFull.includes('isConfigured'),
   'phone index must gate sending on identity config');
 const transferService = read(
-  'apps/phone/entry/src/main/ets/services/BookTransferService.ets');
+  'apps/phone/entry/src/main/ets/services/BookTransferService.ts');
 assert.ok(transferService.includes('peer: { bundleName'),
   'sendBook must take the peer identity object');
 // remoteApp 只能由对端身份构造。
@@ -276,13 +276,13 @@ assert.ok(!transferService.includes(
 
 // P0-3：BookMeta 携带消息通道分块描述。
 const bookModels = read(
-  'apps/phone/entry/src/main/ets/model/BookModels.ets');
+  'apps/phone/entry/src/main/ets/model/BookModels.ts');
 assert.ok(bookModels.includes('chunks: number'),
   'BookMeta must declare chunks');
 assert.ok(bookModels.includes('chunkBytes: number'),
   'BookMeta must declare chunkBytes');
 const importService = read(
-  'apps/phone/entry/src/main/ets/services/BookImportService.ets');
+  'apps/phone/entry/src/main/ets/services/BookImportService.ts');
 assert.ok(importService.includes('chunks,'),
   'import must populate chunks in the meta');
 assert.ok(importService.includes('chunkBytes:'),
@@ -357,13 +357,13 @@ assert.ok(artifactCheck.includes('deviceTypes'),
   'artifact check must verify the device type');
 assert.ok(artifactCheck.includes('buildMode'),
   'artifact check must verify the build mode');
-const transferCode = read('apps/phone/entry/src/main/ets/services/BookTransferService.ets');
+const transferCode = read('apps/phone/entry/src/main/ets/services/BookTransferService.ts');
 assert.ok(transferCode.includes('await this.p2pClient.sendMessage('),
   'phone must await asynchronous Wear Engine message delivery');
 assert.ok(transferCode.includes('wearEngine.P2pResultCode.COMMUNICATION_SUCCESS') &&
   !transferCode.includes('result.code === 0'),
   'file transfer completion must use Huawei success enum, not numeric zero');
-const wearDeviceCode = read('apps/phone/entry/src/main/ets/services/WearDeviceService.ets');
+const wearDeviceCode = read('apps/phone/entry/src/main/ets/services/WearDeviceService.ts');
 assert.ok(wearDeviceCode.includes('registered.appParam, registered.callback'),
   'unsubscribe must reuse the registered appParam and callback');
 const phoneShelf = read('apps/phone/entry/src/main/ets/pages/Index.ets');

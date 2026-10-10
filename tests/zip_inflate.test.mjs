@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Run: node --experimental-default-type=module tests/zip_inflate.test.mjs
-// 把纯 JS 的 ZipReader.ets 复制为 .mjs 后在 Node 中验证：
+// 把纯 JS 的 ZipReader.ts 复制为 .mjs 后在 Node 中验证：
 //   - inflateRaw 与 zlib.deflateRawSync 互操作（多种数据形态）
 //   - 中央目录解析、stored/deflate 条目读取、CRC-32 校验
 //   - ZIP 路径穿越拒绝、zip bomb 上限、ZIP64 明确报错
@@ -13,7 +13,7 @@ import { deflateRawSync, inflateRawSync } from 'node:zlib';
 const tmp = mkdtempSync(join(tmpdir(), 'suyue-zip-'));
 const modPath = join(tmp, 'ZipReader.mjs');
 writeFileSync(modPath, readFileSync(
-  'apps/phone/entry/src/main/ets/services/ZipReader.ets', 'utf8'));
+  'apps/phone/entry/src/main/ets/services/ZipReader.ts', 'utf8'));
 const { ZipReader, inflateRaw, crc32 } = await import(modPath);
 
 // ---------- inflateRaw 与 zlib 互操作 ----------

@@ -20,8 +20,11 @@ const MAX_BOOK_BYTES = 32 * 1024 * 1024;
 const MESSAGE_CHUNK_BYTES = 64 * 1024;
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const hash = cryptoFramework.createHash('SHA256');
-  hash.update({ data: toArrayBuffer(bytes) });
+  // SDK 里没有 createHash：摘要要用 createMd（见 @ohos.security.cryptoFramework）。
+  // update 的 Promise 形态必须 await，否则会与 digest 竞态。
+  // DataBlob.data 在这个 SDK 版本要 Uint8Array，不接受 ArrayBuffer。
+  const hash = cryptoFramework.createMd('SHA256');
+  await hash.update({ data: bytes });
   const digest = await hash.digest();
   const view = new Uint8Array(digest.data);
   let hex = '';

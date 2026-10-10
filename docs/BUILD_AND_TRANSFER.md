@@ -110,7 +110,7 @@ GT 4 46mm 与 Pocket 2 真机、Wear Engine 文件通道回调
 **P0（传书闭环）**
 1. 双端身份分离：`apps/phone/.../model/PeerIdentity.ets`
    定义 `PHONE_SELF` 与 `WATCH_PEER`；指纹经 CI 生成
-   `PeerIdentityConfig.g.ets` / 手表侧 `PhonePeerConfig.g.js`
+   `PeerIdentityConfig.g.ts` / 手表侧 `PhonePeerConfig.g.js`
    注入，空指纹明确禁用发送，不接受假值。
 2. 手机 `remoteApp` 一律使用手表身份
    （现为 `con.xiwei.suyue.gt4`），而不是手机自己的包名

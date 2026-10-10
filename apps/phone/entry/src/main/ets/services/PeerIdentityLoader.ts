@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 手机端双端身份装配：从 CI 生成的
-// PeerIdentityConfig.g.ets 注入指纹。
+// PeerIdentityConfig.g.ts 注入指纹。
 // 本地未生成时保持空（发送/接收明确禁用）。
 import { PHONE_SELF, WATCH_PEER,
   injectFingerprint } from '../model/PeerIdentity';
