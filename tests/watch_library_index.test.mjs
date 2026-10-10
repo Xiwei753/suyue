@@ -242,6 +242,33 @@ let baselineCount = 0;
     'no leftover index tmp file');
 }
 
+// ---- 书架顺序：异步 file.access 故意乱序完成也必须稳定 ----
+{
+  const diskBefore = indexOnDisk().map((e) => e.bookId);
+  const systemFile = (await import(stubPath)).default;
+  const originalAccess = systemFile.access;
+  let checks = 0;
+  systemFile.access = (o) => {
+    if (o.uri.includes('/books/') && o.uri.endsWith('.txt')) {
+      // 第一条最慢，后面的快速返回，复现真机异步乱序完成。
+      checks++;
+      const delay = checks === 1 ? 30 : 1;
+      setTimeout(() => originalAccess(o), delay);
+      return;
+    }
+    originalAccess(o);
+  };
+  try {
+    const listed = await wait((cb) => LibraryIndex.listBooks(cb));
+    assert.deepEqual(listed.map((e) => e.bookId), diskBefore,
+      'async file checks must preserve persisted shelf order');
+    assert.deepEqual(indexOnDisk().map((e) => e.bookId), diskBefore,
+      'listing existing books must not rewrite their ordering');
+  } finally {
+    systemFile.access = originalAccess;
+  }
+}
+
 console.info('PASS: index rollback (alias-free snapshot, ' +
   'move-failure recovery, overwrite fallback) and ' +
   'single-transfer E_BUSY / file-ref probing');

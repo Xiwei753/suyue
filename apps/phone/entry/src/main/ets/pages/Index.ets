@@ -186,13 +186,21 @@ struct Index {
       !this.sending;
   }
 
+  // 失败后允许重新发送；已发送的书也可能被用户从手表删除，
+  // 所以不能永久锁死发送按钮。只有尚未导入完毕的状态禁止发送。
+  private canTransferBook(book: BookMeta): boolean {
+    return book.status === BookStatus.READY ||
+      book.status === BookStatus.SENT ||
+      book.status === BookStatus.TRANSFER_FAILED;
+  }
+
   private async sendBook(book: BookMeta): Promise<void> {
     if (!this.canSend() || this.transferService === null) {
       this.transferText = '发送不可用：请先选择设备并配置手表指纹';
       return;
     }
-    if (book.status !== BookStatus.READY) {
-      this.transferText = '书籍未就绪，不能发送';
+    if (!this.canTransferBook(book)) {
+      this.transferText = '书籍尚未导入完成，不能发送';
       return;
     }
     const device = this.devices[this.selectedDevice];
@@ -265,7 +273,7 @@ struct Index {
         .fontSize(12)
         .height(28)
         .enabled(this.canSend() &&
-          book.status === BookStatus.READY)
+          this.canTransferBook(book))
         .margin({ left: 12 })
         .onClick(() => { this.sendBook(book); })
 

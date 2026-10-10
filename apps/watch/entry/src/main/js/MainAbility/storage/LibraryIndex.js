@@ -163,15 +163,17 @@ export function listBooks(cb) {
   enqueue((done) => {
     loadIndex((entries) => {
       let pending = entries.length;
-      const alive = [];
+      // 文件访问是异步回调：不能按回调完成先后 alive.push，
+      // 否则即使所有书都存在，刷新也会随机打乱书架顺序。
+      const alive = new Array(entries.length);
       if (pending === 0) {
         done();
         return complete(cb, []);
       }
       const settleIfDone = () => {
         if (--pending > 0) return;
-        const result = snapshot(alive);
-        if (alive.length === entries.length) {
+        const result = snapshot(alive.filter((entry) => !!entry));
+        if (result.length === entries.length) {
           done();
           return complete(cb, result);
         }
@@ -180,11 +182,11 @@ export function listBooks(cb) {
           complete(cb, result);
         });
       };
-      entries.forEach((entry) => {
+      entries.forEach((entry, index) => {
         file.access({
           uri: bookPath(entry.bookId),
           success: () => {
-            alive.push(entry);
+            alive[index] = entry;
             settleIfDone();
           },
           fail: () => settleIfDone()

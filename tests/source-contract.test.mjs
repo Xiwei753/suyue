@@ -357,6 +357,12 @@ assert.ok(artifactCheck.includes('deviceTypes'),
   'artifact check must verify the device type');
 assert.ok(artifactCheck.includes('buildMode'),
   'artifact check must verify the build mode');
+const phoneShelf = read('apps/phone/entry/src/main/ets/pages/Index.ets');
+assert.ok(phoneShelf.includes('private canTransferBook(') &&
+  phoneShelf.includes('BookStatus.SENT') &&
+  phoneShelf.includes('BookStatus.TRANSFER_FAILED') &&
+  phoneShelf.includes('this.canTransferBook(book)'),
+  'phone must allow manual resend after successful or failed transfer');
 const watchBuild = read('tools/build_watch_lite.sh');
 const phoneBuild = read('tools/build_phone_hap.sh');
 for (const script of [watchBuild, phoneBuild]) {
