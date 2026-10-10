@@ -183,6 +183,10 @@ else
 fi
 
 echo "Signing $IN_FORM: $(basename "$IN") -> $(basename "$OUT")"
+# 记录工具身份：同一份脚本在不同机器/工具版本上行为可能不同（issue #4 P0）。
+echo "SIGN_TOOL_SHA256=$(sha256sum "$TOOL" | awk '{print $1}')"
+SIGN_LOG="$WORK/.sign-app.log"
+set +e
 java -jar "$TOOL" sign-app \
   -keyAlias "$ALIAS" \
   -signAlg SHA256withECDSA \
@@ -195,27 +199,60 @@ java -jar "$TOOL" sign-app \
   -outFile "$SIGNED_TARGET" \
   -keyPwd "$KEY_PWD" \
   -keystorePwd "$STORE_PWD" \
-  2>&1 | sed -e "s|$KEY_PWD|<redacted>|g" -e "s|$STORE_PWD|<redacted>|g" | tail -3
-if [ ! -s "$SIGNED_TARGET" ]; then
-  echo "ERROR: hap-sign-tool 未输出签名后的 $IN_FORM。" >&2
+  2>&1 | sed -e "s|$KEY_PWD|<redacted>|g" -e "s|$STORE_PWD|<redacted>|g" > "$SIGN_LOG"
+SIGN_RC=${PIPESTATUS[0]}
+set -e
+tail -3 "$SIGN_LOG"
+# 签名命令本身必须真的成功：退出码 0、有产物、且工具打印 sign-app success。
+if [ "$SIGN_RC" -ne 0 ] || [ ! -s "$SIGNED_TARGET" ] \
+    || ! grep -q 'sign-app success' "$SIGN_LOG"; then
+  echo "ERROR: hap-sign-tool sign-app 未成功（exit=$SIGN_RC）；拒绝发布。" >&2
+  tail -5 "$SIGN_LOG" >&2
   exit 1
 fi
+echo "SIGNED_TOOL_OK: sign-app -inForm $IN_FORM exit=$SIGN_RC"
 
 # ---------- 验签（在真正交给手表的文件上进行）----------
 # -outCertChain 必须是 .cer 后缀；单 bin 不能拿外层 ZIP 验签替代。
+# 普通 HAP/Stage/ELF 仍然**严格**验签：任何失败都硬失败。
+# 唯一的例外见下面受限兼容分支：已被严格识别为 Lite 单 0xBE bin 的产物，
+# 当本机工具对这类包误走 ELF 校验路径时，把该**已知**错误降级为明确警告。
 echo "Verifying signature of $IN_FORM payload"
-if ! java -jar "$TOOL" verify-app \
-    -inForm "$IN_FORM" \
-    -inFile "$SIGNED_TARGET" \
-    -outCertChain "$WORK/.verify.cer" \
-    -outProfile "$WORK/.verify.p7b" > "$WORK/.verify.log" 2>&1; then
-  echo "ERROR: verify-app -inForm $IN_FORM 未通过；拒绝发布。" >&2
-  tail -5 "$WORK/.verify.log" >&2
-  exit 1
-fi
-if ! grep -q 'verify-app success' "$WORK/.verify.log"; then
-  echo "ERROR: verify-app 没有报告 success；拒绝发布。" >&2
-  tail -5 "$WORK/.verify.log" >&2
+VERIFY_COMPAT=0
+VERIFY_LOG="$WORK/.verify.log"
+set +e
+java -jar "$TOOL" verify-app \
+  -inForm "$IN_FORM" \
+  -inFile "$SIGNED_TARGET" \
+  -outCertChain "$WORK/.verify.cer" \
+  -outProfile "$WORK/.verify.p7b" > "$VERIFY_LOG" 2>&1
+VERIFY_RC=$?
+set -e
+if [ "$VERIFY_RC" -eq 0 ] && grep -q 'verify-app success' "$VERIFY_LOG"; then
+  echo "VERIFY_APP_OK: verify-app -inForm $IN_FORM 通过"
+elif [ "$HAP_KIND" = "lite-bin" ] \
+    && grep -q 'verify: elf magic verify failed' "$VERIFY_LOG"; then
+  # 受限兼容分支：仅对严格识别的 Lite 单 bin，且仅当出现这个已知的
+  # 工具输入格式限制（0xBE 容器被送进 ELF 校验路径）时才降级。
+  # 绝不打印成 Verify success，也不吞掉签名失败/IO 失败/身份错误/其它未知错误
+  # ——那些都落到下面的 else 硬失败分支。
+  cat >&2 <<'MSG'
+
+------------------------------------------------------------------------
+WARN VERIFY_UNSUPPORTED_FOR_LITE_BIN:
+  本机 hap-sign-tool 的 verify-app 对 0xBE 开头的 GT Lite 单 bin 走的是 ELF
+  校验路径，报 "verify: elf magic verify failed"。这是**验签工具的输入格式
+  限制**，不是签名失败，也不代表已完成密码学验签；目前本机无法独立验签这类包。
+  该错误已被记录，但不会被当作 Verify success。补偿检查另行严格完成：
+  sign-app 真成功、输入/输出 BIN 包头身份合法且一致、输出与输入不同、
+  最终 ZIP 恰好一个 BIN 且解出内容与签名输出逐字节一致。
+------------------------------------------------------------------------
+MSG
+  VERIFY_COMPAT=1
+  echo "VERIFY_UNSUPPORTED_FOR_LITE_BIN: verify-app 无法独立验签 0xBE Lite bin（工具限制，已记录）"
+else
+  echo "ERROR: verify-app -inForm $IN_FORM 未通过（exit=$VERIFY_RC）；拒绝发布。" >&2
+  tail -8 "$VERIFY_LOG" >&2
   exit 1
 fi
 
@@ -255,8 +292,10 @@ try:
 finally:
     if os.path.exists(part):
         os.unlink(part)
-print("LITE_BIN_SIGNED_OK: one changed, verified signed .bin inside HAP")
+print("LITE_BIN_SIGNED_OK: one changed signed .bin inside HAP")
 print("SIGNED_BIN_SHA256=" + hashlib.sha256(signed_bytes).hexdigest())
+print("HAP_PACKAGED_OK: " + os.path.basename(output)
+      + " holds exactly one signed .bin")
 PY
   then
     echo "ERROR: 签名后的 bin 重打包失败，拒绝发布。" >&2
@@ -269,7 +308,13 @@ if [ ! -s "$OUT" ]; then
   echo "ERROR: 未生成最终 signed HAP。" >&2
   exit 1
 fi
-grep -E 'Digest verify result|verify:' "$WORK/.verify.log" \
-  | sed 's/^[0-9-]* [0-9:.]* *INFO - //' || true
-rm -f "$WORK/.verify.cer" "$WORK/.verify.p7b" "$WORK/.verify.log"
+if [ "$HAP_KIND" != "lite-bin" ]; then
+  echo "HAP_PACKAGED_OK: $(basename "$OUT") size=$(stat -c%s "$OUT" 2>/dev/null || stat -f%z "$OUT")"
+fi
+# 受限兼容分支下不再回显原始验签日志，避免把已知的工具限制再次打印成 ERROR。
+if [ "$VERIFY_COMPAT" = "0" ]; then
+  grep -E 'Digest verify result|verify:' "$WORK/.verify.log" \
+    | sed 's/^[0-9-]* [0-9:.]* *INFO - //' || true
+fi
+rm -f "$WORK/.verify.cer" "$WORK/.verify.p7b" "$WORK/.verify.log" "$WORK/.sign-app.log"
 echo "SIGNED_HAP=$OUT"

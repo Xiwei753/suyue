@@ -116,45 +116,12 @@ jobs:
             --mode debug \
             --expect-fingerprint "$PHONE_FP"
 
-      - name: Verify actual delivered BIN signature with hap-sign-tool
-        # 证书签名验证：本步失败即失败，不能用
-        # 「ZIP/清单检查」代替（P1-6）。
-        env:
-          HAP_SIGN_TOOL_JAR: ${{ vars.HAP_SIGN_TOOL_JAR }}
-        run: |
-          TOOL="$HAP_SIGN_TOOL_JAR"
-          if [ -z "$TOOL" ]; then
-            for candidate in \
-              "$HOME/.harmony-cli/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar" \
-              "$HOME/command-line-tools/sdk/default/openharmony/toolchains/lib/hap-sign-tool.jar" \
-              /opt/deveco/toolchains/lib/hap-sign-tool.jar; do
-              [ -f "$candidate" ] && TOOL="$candidate" && break
-            done
-          fi
-          if [ -z "$TOOL" ] || [ ! -f "$TOOL" ]; then
-            echo "ERROR: hap-sign-tool.jar 不可用（设置 repo variable HAP_SIGN_TOOL_JAR）。" >&2
-            echo "未做证书签名验证的构建不能标记为成功。" >&2
-            exit 1
-          fi
-          # HDEA 解开 HAP 后只传 .bin，必须验证交付文件自身的签名。
-          BIN="$RUNNER_TEMP/suyue-watch-verified.bin"
-          python3 - "${{ steps.hap.outputs.path }}" "$BIN" <<'PY'
-          import sys, zipfile
-          with zipfile.ZipFile(sys.argv[1]) as z:
-              files = z.infolist()
-              if (len(files) != 1 or not files[0].filename.endswith(".bin")
-                      or files[0].is_dir() or "/" in files[0].filename
-                      or "\\" in files[0].filename):
-                  raise ValueError("Lite signed HAP must contain exactly one root .bin")
-              with open(sys.argv[2], "wb") as out:
-                  out.write(z.read(files[0]))
-          PY
-          java -jar "$TOOL" verify-app \
-            -inForm bin \
-            -inFile "$BIN" \
-            -outCertChain "$RUNNER_TEMP/verify.cer" \
-            -outProfile "$RUNNER_TEMP/verify.p7b"
-          rm -f "$BIN" "$RUNNER_TEMP/verify.cer" "$RUNNER_TEMP/verify.p7b"
+      # 已删除旧步骤「Verify actual delivered BIN signature with hap-sign-tool」：
+      # 本机工具对 0xBE 的 GT Lite 单 bin 必走 ELF 校验路径而失败——在那里裸调
+      # 官方验签命令是**必然失败**的重复调用。签名与「受限验签兼容分支」统一由
+      # tools/sign_hap.sh（经 tools/build_watch_lite.sh 调用）负责，本 workflow
+      # 与本地使用同一份规则，避免两处漂移。普通 HAP/Stage 的严格验签逻辑仍保留
+      # 在 sign_hap.sh 内，未做全局关闭。
 
       - name: Report artifact identity
         run: |

@@ -76,11 +76,20 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
 - **包名**：手表 = **`con.xiwei.suyue.gt4`**（`con` 不是笔误：AGC 里
   实际注册的名字，已确认保留），手机 = `com.xiwei.suyue`。
   两者必须互不相同——双端靠包名区分自己与对端，撞名会让配对门控失效。
-- 签名走的是**未签名构建 + `hap-sign-tool sign-app` + `verify-app`**：
-  hvigor 的 `signingConfigs` 在这个 legacy Lite 工程上实测失败
+- 签名走的是**未签名构建 + `hap-sign-tool sign-app`**：hvigor 的
+  `signingConfigs` 在这个 legacy Lite 工程上实测失败
   （`SignHap` → `00308018 ENOENT: stat '<dir>/material'`），
   与素笺 CI 采用同一条绕行路径。材料放在 gitignore 掉的
   `signing/` 目录，说明见 [signing/README.md](../../signing/README.md)。
+- **GT4/HDEA 走单 BIN 口径（Issue #4）**：HDEA 解包后只把内部 `entry.bin`
+  发到手表，外层 ZIP 签名无效，因此脚本对 HAP 内那**唯一**一个 `*.bin`
+  执行 `sign-app -inForm bin`，再原样封回单 BIN HAP。`verify-app -inForm bin`
+  对本 0xBE 格式会走 ELF 校验路径、必然报 `verify: elf magic verify failed`，
+  属**工具输入格式限制**：脚本把它降级为显式 WARNING
+  （`VERIFY_UNSUPPORTED_FOR_LITE_BIN`），**不会**伪造 `Verify success`，
+  也不放过签名失败/IO/身份错误；普通 HAP 验签仍严格。签名成功与验签成功
+  是两件事，GT4 安装成功又是第三件事（见
+  [../../docs/WATCH_INSTALL.md](../../docs/WATCH_INSTALL.md)）。
 - **从未在真机安装验证**：签名只证明包完整、证书链有效、包名与 profile 一致，
   不代表 GT 4 接受安装（profile 是 debug 类型、绑定 UDID，
   且设备端还会校验包名/UDID/有效期）。
@@ -89,7 +98,7 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
   字节）塞进 HAP，整包膨胀到 4.45 MB。改成与上游示例一致的
   104×104 / 92×92 后，`.bin` 降到 43,272 / 33,864 字节，HAP 只有
   190 KB 量级。
-- CI：`.github/workflows/watch_lite_hap.yml`（自托管 `hmos-deveco` runner；签名材料经 `secrets.WATCH_SIGNING_MATERIAL` 注入；产物只上传 HAP）。**注意该 job 目前在排队而非运行**：GitHub 托管机装不了 Lite SDK，必须先注册带工具链的自托管 runner。该 workflow 的源码现已改成先产出未签名 Lite HAP，再用 `hap-sign-tool sign-app` 签名并 `verify-app` 验签；**但自托管 Runner 仍未运行，暂不能称 CI 构建通过**。
+- CI：`.github/workflows/watch_lite_hap.yml`（自托管 `hmos-deveco` runner；签名材料经 `secrets.WATCH_SIGNING_MATERIAL` 注入；产物只上传本次新产出的 Debug 签名 HAP）。**注意该 job 目前在排队而非运行**：GitHub 托管机装不了 Lite SDK，必须先注册带工具链的自托管 runner。该 workflow 现已直接调用 `tools/build_watch_lite.sh debug`（与本机同源），并删除了对 Lite BIN 必然失败的裸 `verify-app -inForm bin` 步骤；**但自托管 Runner 仍未运行，暂不能称 CI 构建通过**。
 - 安装步骤与待验证清单：[../../docs/WATCH_INSTALL.md](../../docs/WATCH_INSTALL.md)。
 - **尚未在任何真机上安装或运行；`6.1.1(24)` 版本号待 GT 4 真机核对。**
 

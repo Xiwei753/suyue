@@ -11,6 +11,9 @@
 #     不得验到 debug 或旧产物；
 #   - 可选：Manifest 中必须出现期望指纹，
 #     且不得残留占位符；
+#   - 可选：--expect-bin-sha256 时，ZIP 内提取的
+#     BIN 必须与本次签名输出逐字节一致（是"归档
+#     内容 == 签名产物"，不是"签名前后哈希相同"）；
 #   - 非零字节，报告大小与 SHA-256。
 #
 # 注意：本脚本只做**容器/清单级**检查，
@@ -26,6 +29,7 @@ BUNDLE=""
 DEVICE=""
 MODE=""
 EXPECT_FINGERPRINT=""
+EXPECT_BIN_SHA256=""
 SOURCE_MANIFEST=""
 SINGLE_BIN=0
 MANIFEST_ORIGIN="embedded"
@@ -35,6 +39,7 @@ while [ "$#" -gt 0 ]; do
     --device) DEVICE="${2:?--device needs a value}"; shift 2 ;;
     --mode) MODE="${2:?--mode needs a value}"; shift 2 ;;
     --expect-fingerprint) EXPECT_FINGERPRINT="${2:?--expect-fingerprint needs a value}"; shift 2 ;;
+    --expect-bin-sha256) EXPECT_BIN_SHA256="${2:?--expect-bin-sha256 needs a value}"; shift 2 ;;
     --source-manifest) SOURCE_MANIFEST="${2:?--source-manifest needs a value}"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -252,6 +257,27 @@ if [ "$SINGLE_BIN" = "1" ]; then
       --hap "$HAP" --bundle "$BUNDLE"; then
     echo "FAIL: Lite BIN 的真实包名或头部不正确。" >&2
     exit 1
+  fi
+  # 逐字节核对：ZIP 内提取的 BIN 必须与本次签名输出完全一致。
+  # （这不是"签名前后 BIN 哈希相同"；只是"归档内容 == 签名产物"。）
+  if [ -n "$EXPECT_BIN_SHA256" ]; then
+    ACTUAL_BIN_SHA="$(python3 - "$HAP" <<'PY'
+import hashlib, sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as z:
+    files = z.infolist()
+    if len(files) != 1 or files[0].is_dir():
+        raise SystemExit("not a single-entry archive: %s" % [f.filename for f in files])
+    print(hashlib.sha256(z.read(files[0])).hexdigest())
+PY
+)"
+    if [ "$ACTUAL_BIN_SHA" != "$EXPECT_BIN_SHA256" ]; then
+      echo "FAIL: HAP 内的 BIN 与本次签名产物不一致" >&2
+      echo "      extracted=$ACTUAL_BIN_SHA" >&2
+      echo "      expected =$EXPECT_BIN_SHA256" >&2
+      echo "      ($HAP)" >&2
+      exit 1
+    fi
+    echo "BIN_SHA256_MATCH=$ACTUAL_BIN_SHA"
   fi
   echo "WARN: 单 .bin HAP 不含顶层 manifest/.bc；包名、指纹、设备类型仅根据本次源码 config.json 校验，不能冒充已验证 bin 内数据。" >&2
 fi
