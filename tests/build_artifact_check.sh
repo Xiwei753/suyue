@@ -26,12 +26,16 @@ BUNDLE=""
 DEVICE=""
 MODE=""
 EXPECT_FINGERPRINT=""
+SOURCE_MANIFEST=""
+SINGLE_BIN=0
+MANIFEST_ORIGIN="embedded"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --bundle) BUNDLE="${2:?--bundle needs a value}"; shift 2 ;;
     --device) DEVICE="${2:?--device needs a value}"; shift 2 ;;
     --mode) MODE="${2:?--mode needs a value}"; shift 2 ;;
     --expect-fingerprint) EXPECT_FINGERPRINT="${2:?--expect-fingerprint needs a value}"; shift 2 ;;
+    --source-manifest) SOURCE_MANIFEST="${2:?--source-manifest needs a value}"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -62,22 +66,38 @@ if ! unzip -tqq "$HAP" >/dev/null 2>&1; then
   exit 1
 fi
 
-# 2) 模块清单存在。实测三种叫法都要认：
-#      module.json  —— Stage HAP（本仓库手机端；内含 app + module）
-#      modules.json —— 部分 HSP/旧打包
-#      config.json  —— Lite FA（本仓库手表端）
-if unzip -l "$HAP" module.json >/dev/null 2>&1; then
-  MANIFEST="module.json"
-elif unzip -l "$HAP" modules.json >/dev/null 2>&1; then
-  MANIFEST="modules.json"
-elif unzip -l "$HAP" config.json >/dev/null 2>&1; then
+# 2) Manifest: 现代 HAP 是顶层 config.json / module.json；
+# legacy Lite Debug HAP 的 ZIP 可能只有 entry-default-unsigned.bin，
+# 不能把这种合法的调测助手容器误判为"清单缺失"。
+if [ "$DEVICE" = "liteWearable" ] && python3 - "$HAP" <<'PY'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as z:
+    files = [x.filename for x in z.infolist() if not x.is_dir()]
+    assert len(files) == 1 and files[0].endswith(".bin")
+    assert "/" not in files[0] and "\\" not in files[0]
+PY
+then
+  SINGLE_BIN=1
+  if [ -z "$SOURCE_MANIFEST" ] || [ ! -f "$SOURCE_MANIFEST" ]; then
+    echo "FAIL: Lite single-bin HAP requires a source config.json via --source-manifest." >&2
+    exit 1
+  fi
   MANIFEST="config.json"
+  MANIFEST_ORIGIN="source-only"
+  MANIFEST_TEXT="$(cat "$SOURCE_MANIFEST")"
 else
-  echo "FAIL: HAP contains no module.json / modules.json / config.json: $HAP" >&2
-  exit 1
+  if unzip -l "$HAP" module.json >/dev/null 2>&1; then
+    MANIFEST="module.json"
+  elif unzip -l "$HAP" modules.json >/dev/null 2>&1; then
+    MANIFEST="modules.json"
+  elif unzip -l "$HAP" config.json >/dev/null 2>&1; then
+    MANIFEST="config.json"
+  else
+    echo "FAIL: HAP has no supported manifest or Lite single-bin layout: $HAP" >&2
+    exit 1
+  fi
+  MANIFEST_TEXT="$(unzip -p "$HAP" "$MANIFEST" 2>/dev/null)"
 fi
-
-MANIFEST_TEXT="$(unzip -p "$HAP" "$MANIFEST" 2>/dev/null)"
 
 # 3) 包名。
 if [ -n "$BUNDLE" ]; then
@@ -171,7 +191,7 @@ fi
 #    实测触发原因：该 JerryScript 构建没有 RegExp，正则字面量在
 #    解析期报 SyntaxError（详见 apps/watch/.../util/Validate.js）。
 #    这里把"缺快照"变成硬失败，不再靠人眼翻构建日志。
-if [ "$DEVICE" = "liteWearable" ]; then
+if [ "$DEVICE" = "liteWearable" ] && [ "$SINGLE_BIN" = "0" ]; then
   ENTRIES="$(unzip -Z1 "$HAP" 2>/dev/null)" || ENTRIES=""
   if [ -z "$ENTRIES" ]; then
     echo "FAIL: cannot list HAP entries (unzip -Z1 unavailable): $HAP" >&2
@@ -197,5 +217,9 @@ if [ "$DEVICE" = "liteWearable" ]; then
   fi
 fi
 
+if [ "$SINGLE_BIN" = "1" ]; then
+  echo "WARN: 单 .bin HAP 不含顶层 manifest/.bc；包名、指纹、设备类型仅根据本次源码 config.json 校验，不能冒充已验证 bin 内数据。" >&2
+fi
+
 SHA="$(sha256sum "$HAP" | awk '{print $1}')"
-echo "HAP_OK path=$HAP manifest=$MANIFEST size=$SIZE mode=${MODE:-unknown} signed=$SIGNED_STATE sha256=$SHA note=container-and-manifest-check-only"
+echo "HAP_OK path=$HAP manifest=$MANIFEST manifest_origin=$MANIFEST_ORIGIN single_bin=$SINGLE_BIN size=$SIZE mode=${MODE:-unknown} signed=$SIGNED_STATE sha256=$SHA note=archive-check-not-device-install"
