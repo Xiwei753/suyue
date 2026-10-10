@@ -25,8 +25,8 @@
   授权/发现各自失败阶段与 `BusinessError.code` 结构化返回，
   不再一律 `E_PEER_UNAVAILABLE`。
 - `services/WearAuthPolicy.js`：纯逻辑（无 SDK 依赖，Node 可测）：
-  错误码分类（1008500004 未申请服务 / 1008500005·201 未授权 /
-  1008500006 未同意隐私 / 401 参数非法 / 其它保留原始码）、
+  错误码分类（1008500004 未申请服务 / 1008500005 未授权 /
+  1008500006 未同意隐私 / 401 参数非法 / 201 与其它保留原始码）、
   授权与发现的用户文案；「空列表」≠「未配对/蓝牙没连」。
 - `services/BookTransferService.ets`：按协议序列发送
   HELLO → BOOK_META → `transferFile` 文件通道 →

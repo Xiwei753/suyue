@@ -12,7 +12,7 @@
 import { wearEngine } from '@kit.WearEngine';
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { BusinessError } from '@kit.BasicServicesKit';
+import { BusinessError, Callback } from '@kit.BasicServicesKit';
 import { TargetDevice } from '../model/TransferModels';
 
 const TAG = 'suyue/WearDeviceService';

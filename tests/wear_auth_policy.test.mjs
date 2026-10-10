@@ -26,12 +26,29 @@ assert.equal(describeWearError('device_query', 1008500004, '').kind,
   'service_not_applied');
 assert.equal(describeWearError('auth_query', 1008500005, '').kind,
   'not_authorized');
-assert.equal(describeWearError('auth_request', 201, '').kind,
-  'not_authorized');
 assert.equal(describeWearError('auth_query', 1008500006, '').kind,
   'privacy_not_agreed');
 assert.equal(describeWearError('auth_request', 401, '').kind,
   'param_invalid');
+// 201：SDK d.ts 里属 P2pResultCode.REMOTE_APP_NOT_RUNNING，与文档示例的
+// 「未授权」冲突，无法确证；不编结论，原样保留 code 走 api_error。
+const p2p201 = describeWearError('auth_request', 201, '');
+assert.equal(p2p201.kind, 'api_error');
+assert.equal(p2p201.code, 201);
+assert.ok(p2p201.text.includes('201'), 'raw code 201 must surface in text');
+// d.ts 确证的其余 BusinessError 码各自可区分。
+assert.equal(describeWearError('auth_query', 1008500001, '').kind,
+  'network_error');
+assert.equal(describeWearError('device_query', 1008500002, '').kind,
+  'no_device_bound');
+assert.equal(describeWearError('device_query', 1008500003, '').kind,
+  'device_disconnected');
+assert.equal(describeWearError('device_query', 1008500007, '').kind,
+  'device_unsupported');
+assert.equal(describeWearError('auth_query', 1008500008, '').kind,
+  'account_not_logged_in');
+assert.equal(describeWearError('auth_query', 1008500009, '').kind,
+  'account_error');
 const unknown = describeWearError('device_query', 12345, 'boom');
 assert.equal(unknown.kind, 'api_error');
 assert.equal(unknown.code, 12345, 'unknown code must be preserved verbatim');

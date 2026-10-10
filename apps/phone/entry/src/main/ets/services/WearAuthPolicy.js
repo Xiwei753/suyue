@@ -30,14 +30,35 @@ export function shorten(message) {
   return t.length > 120 ? t.substring(0, 120) + '…' : t;
 }
 
-// 官方依据（Huawei Wear Engine ArkTS 文档 / SDK d.ts）：
+// 官方依据：本机 SDK d.ts @hms.health.wearEngine.d.ts 的 BusinessError 列表
+//   1008500001  网络不可用
+//   1008500002  未绑定设备
+//   1008500003  设备已断开
 //   1008500004  未申请 Wear Engine 服务（AGC 申请 + 审批）
 //   1008500005  HUAWEI ID 未授权（所需权限未由用户授予）
 //   1008500006  未同意隐私声明
+//   1008500007  设备不支持该能力
+//   1008500008  未登录 HUAWEI ID
+//   1008500009  获取账号信息失败
 //   401         请求参数非法
-//   201         华为文档标注为「未授权」（真机尚未观察到，仅原样保留 code）
+// 关于 201：华为 request_user_authorization 文档示例里出现过 201，但本机 SDK
+// d.ts 中 201 属于 P2pResultCode（REMOTE_APP_NOT_RUNNING，手表端应用未运行），
+// 两者冲突、无法确证；因此不为 201 编造「未授权」结论，交由下方 api_error
+// 原样保留 code（不丢失 (201) 信息）。
 export function describeWearError(stage, code, message) {
   const n = typeof code === 'number' ? code : 0;
+  if (n === 1008500001) {
+    return { stage: stage, code: n, kind: 'network_error',
+      text: '网络不可用（1008500001），请检查网络后重试' };
+  }
+  if (n === 1008500002) {
+    return { stage: stage, code: n, kind: 'no_device_bound',
+      text: '未绑定设备（1008500002），请先在运动健康里完成 GT 4 配对' };
+  }
+  if (n === 1008500003) {
+    return { stage: stage, code: n, kind: 'device_disconnected',
+      text: '设备已断开（1008500003），请确认手表与手机蓝牙已连接' };
+  }
   if (n === 1008500004) {
     return { stage: stage, code: n, kind: 'service_not_applied',
       text: 'Wear Engine 服务未开通或未审批（1008500004），' +
@@ -51,9 +72,17 @@ export function describeWearError(stage, code, message) {
     return { stage: stage, code: n, kind: 'privacy_not_agreed',
       text: '未同意隐私声明（1008500006），请在授权页同意后重试' };
   }
-  if (n === 201) {
-    return { stage: stage, code: n, kind: 'not_authorized',
-      text: '尚未授权手表访问（201），请点击「授权手表访问」' };
+  if (n === 1008500007) {
+    return { stage: stage, code: n, kind: 'device_unsupported',
+      text: '设备不支持该能力（1008500007）' };
+  }
+  if (n === 1008500008) {
+    return { stage: stage, code: n, kind: 'account_not_logged_in',
+      text: '未登录 HUAWEI ID（1008500008），请先在手机登录华为账号' };
+  }
+  if (n === 1008500009) {
+    return { stage: stage, code: n, kind: 'account_error',
+      text: '获取账号信息失败（1008500009），请稍后重试' };
   }
   if (n === 401) {
     return { stage: stage, code: n, kind: 'param_invalid',
