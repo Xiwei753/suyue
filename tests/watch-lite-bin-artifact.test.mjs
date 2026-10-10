@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // ZIP/source-contract tests, not actual signing or device installation.
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -13,6 +13,17 @@ for (const script of ['tools/sign_hap.sh', 'tools/build_watch_lite.sh',
   const r = spawnSync('bash', ['-n', script], { encoding: 'utf8' });
   assert.equal(r.status, 0, script + ': ' + r.stderr);
 }
+
+// Prevent returning to outer-ZIP signing for Lite: HDEA discards that signature.
+const signing = readFileSync('tools/sign_hap.sh', 'utf8');
+const watchCI = readFileSync('.github/workflows/watch_lite_hap.yml', 'utf8');
+assert.ok(signing.includes('IN_FORM="bin"'));
+assert.ok(signing.includes('-inForm "$IN_FORM"'));
+assert.ok(signing.includes('SIGN_TARGET="$LITE_TMP/unsigned.bin"'));
+assert.ok(signing.includes('check_lite_bin.py'));
+assert.ok(signing.includes('LITE_BIN_SIGNED_OK'));
+assert.ok(watchCI.includes('-inForm bin'));
+assert.ok(watchCI.includes('Verify actual delivered BIN signature'));
 
 const root = mkdtempSync(join(tmpdir(), 'suyue-lite-bin-'));
 const signed = join(root, 'entry-default-debug-signed.hap');
