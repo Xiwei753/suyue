@@ -131,6 +131,9 @@ if [ -z "$HAP_SIGN_TOOL" ]; then
 fi
 
 SIGNED_HAP=""
+SIGNED_BIN_SHA256=""
+VERIFY_STATE=""
+SIGN_STATUS=""
 if [ -n "$SIGN_P12" ] || [ -n "$SIGN_CER" ] || [ -n "$SIGN_PROFILE" ]; then
   missing=""
   [ -f "$SIGN_P12" ] || missing="$missing WATCH_SIGN_P12"
@@ -155,6 +158,7 @@ if [ -n "$SIGN_P12" ] || [ -n "$SIGN_CER" ] || [ -n "$SIGN_PROFILE" ]; then
   # hap-sign-tool 照样报 "Sign Hap success!"、verify-app 也报
   # Verify success，但设备按包名校验会拒绝安装——"签名成功"没有意义。
   SIGNED_HAP="$OUT_DIR/entry-default-$MODE-signed.hap"
+  SIGN_HAP_LOG="$OUT_DIR/.sign_hap.log"
   set +e
   "$REPO_ROOT/tools/sign_hap.sh" \
     --in "$HAP" \
@@ -167,12 +171,21 @@ if [ -n "$SIGN_P12" ] || [ -n "$SIGN_CER" ] || [ -n "$SIGN_PROFILE" ]; then
     --alias "$SIGN_ALIAS" \
     --key-pwd "$SIGN_KEY_PWD" \
     --store-pwd "$SIGN_STORE_PWD" \
-    --tool "$HAP_SIGN_TOOL"
-  SIGN_STATUS=$?
+    --tool "$HAP_SIGN_TOOL" 2>&1 | tee "$SIGN_HAP_LOG"
+  SIGN_STATUS=${PIPESTATUS[0]}
   set -e
   if [ "$SIGN_STATUS" = "0" ]; then
     HAP="$SIGNED_HAP"
     UNSIGNED=0
+    # 本次签名的内部 BIN 摘要，稍后逐字节核对最终 ZIP 里的 BIN。
+    SIGNED_BIN_SHA256="$(sed -n 's/^SIGNED_BIN_SHA256=//p' "$SIGN_HAP_LOG" | tail -n 1)"
+    if grep -q '^VERIFY_UNSUPPORTED_FOR_LITE_BIN:' "$SIGN_HAP_LOG"; then
+      VERIFY_STATE="VERIFY_UNSUPPORTED_FOR_LITE_BIN"
+    elif grep -q '^VERIFY_APP_OK:' "$SIGN_HAP_LOG"; then
+      VERIFY_STATE="VERIFY_APP_OK"
+    else
+      VERIFY_STATE="unknown"
+    fi
     echo "SIGNED_LITE_HAP_PATH=$REPO_ROOT/apps/watch/$HAP"
   elif [ "$SIGN_STATUS" = "3" ]; then
     cat >&2 <<'MSG'
@@ -191,12 +204,32 @@ MSG
   fi
 fi
 
-"$REPO_ROOT/tests/build_artifact_check.sh" \
-  "$REPO_ROOT/apps/watch/$HAP" \
-  --bundle 'con.xiwei.suyue.gt4' \
-  --source-manifest "$REPO_ROOT/apps/watch/entry/src/main/config.json" \
-  --device liteWearable \
+ARTIFACT_CHECK_ARGS=(
+  "$REPO_ROOT/apps/watch/$HAP"
+  --bundle 'con.xiwei.suyue.gt4'
+  --source-manifest "$REPO_ROOT/apps/watch/entry/src/main/config.json"
+  --device liteWearable
   --mode "$MODE"
+)
+# 逐字节核对：最终 ZIP 里的 BIN 必须就是本次签名产出的那个 BIN（issue #4）。
+# 这不是"签名前后哈希相同"，而是"归档内容 == 签名输出"。
+if [ -n "$SIGNED_BIN_SHA256" ]; then
+  ARTIFACT_CHECK_ARGS+=(--expect-bin-sha256 "$SIGNED_BIN_SHA256")
+fi
+"$REPO_ROOT/tests/build_artifact_check.sh" "${ARTIFACT_CHECK_ARGS[@]}"
+
+if [ "$UNSIGNED" = "0" ]; then
+  BIN_BUNDLE="$(python3 "$REPO_ROOT/tools/check_lite_bin.py" \
+      --hap "$REPO_ROOT/apps/watch/$HAP" --bundle 'con.xiwei.suyue.gt4' 2>/dev/null \
+      | sed -n 's/.*header bundleName=\([^ ]*\).*/\1/p')"
+  echo "WATCH_HAP_PATH=$REPO_ROOT/apps/watch/$HAP"
+  echo "WATCH_HAP_SIZE=$(stat -c%s "$REPO_ROOT/apps/watch/$HAP" 2>/dev/null || stat -f%z "$REPO_ROOT/apps/watch/$HAP")"
+  echo "WATCH_HAP_SHA256=$(sha256sum "$REPO_ROOT/apps/watch/$HAP" | awk '{print $1}')"
+  echo "WATCH_HAP_BIN_BUNDLE=${BIN_BUNDLE:-unknown}"
+  echo "WATCH_SIGN_STATUS=SIGNED_TOOL_OK"
+  echo "WATCH_VERIFY_STATUS=${VERIFY_STATE:-unknown}"
+  rm -f "$SIGN_HAP_LOG"
+fi
 
 if [ "$UNSIGNED" = "1" ]; then
   cat >&2 <<'MSG'

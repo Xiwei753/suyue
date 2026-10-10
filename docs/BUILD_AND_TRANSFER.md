@@ -104,8 +104,11 @@ hdc install -r <signed.hap>      -> install bundle successfully
    不再自动重造，只在旧 `demo.txt` 真实存在时迁移；迁移
    摘要读取失败时不写空摘要、不登记。
 6. `tests/build_artifact_check.sh` 明确标注只做容器/清单
-   检查、**不做证书签名验证**；两个 workflow 新增
-   `hap-sign-tool verify-app` 验签步骤（工具缺失即失败）。
+   检查、**不做证书签名验证**；手机 workflow 新增
+   `hap-sign-tool verify-app` 验签步骤（工具缺失即失败）；
+   手表 workflow 改为直接调用 `tools/build_watch_lite.sh debug`
+   （见 `docs/WATCH_INSTALL.md`：Lite 单 BIN 的 `verify-app` 是
+   工具不支持的已知项，降级为显式 WARNING，**不算验签通过**）。
 7. 取消接通真实 SDK：`cancelFileTransfer(deviceRandomId,
    appParam, P2pFile)`（以华为指南为准，待真机验证）+
    向手表发 `ERROR code=E_CANCELLED`；手机界面新增
@@ -196,7 +199,7 @@ Secrets、GT 4 46mm 与 Pocket 2 真机、Wear Engine
 - 手表文件通道依赖 Wear Engine 回调给出的文件路径字段：实现按 `file`/`name`/`uri`/`filePath` 逐字段探测并记录来源，**字段名待真机核对**。
 - 手表单本在途互斥（`E_BUSY`）：并发传书会被拒绝，手机侧同样限制并发发送。
 - 证书指纹格式（hex / 编码字符串）以 GT4 Lite SDK 实测为准；当前注入脚本默认宽松校验，可用 `--fingerprint-format hex64` 收紧。
-- `tests/build_artifact_check.sh` 只做容器/清单级检查，**不构成证书签名验证**；验签由 workflow 的 `hap-sign-tool verify-app` 步骤负责（需要真实工具链）。
+- `tests/build_artifact_check.sh` 只做容器/清单级检查，**不构成证书签名验证**；手机包验签由 workflow 的 `hap-sign-tool verify-app` 步骤负责（需要真实工具链）。手表 Lite 单 BIN 的 `verify-app` 在本机对 0xBE 格式走 ELF 路径、必然失败，故由 `tools/sign_hap.sh` 记为显式 WARNING（`VERIFY_UNSUPPORTED_FOR_LITE_BIN`），**不当作验签通过**；详见 `docs/WATCH_INSTALL.md`。
 - 目前只有 Node 测试（`tests/`）。Node 通过不代表 Lite JS 编译器/ArkTS 编译器通过，也不代表 Wear Engine 真机互通。
 - 两套应用包名保留历史命名，以避免与签名注册和传输配置脱节。
 

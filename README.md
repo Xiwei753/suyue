@@ -2,7 +2,7 @@
 
 面向 **HUAWEI WATCH GT 4 46 mm（466 × 466 圆屏）** 的个人离线小说阅读器，以及配套的鸿蒙手机传书应用。
 
-> 当前状态：**手表 Lite 工程已按新包名 `con.xiwei.suyue.gt4` 真实编译并签名成功**（`entry-default-release-signed.hap`，215,323 字节，`signed=yes`，`verify-app` 报 `Digest verify result: true` / `Verify success`；包内嵌的是手表自己的调试 profile，授权设备含 GT 4 的 UDID）。**但从未在 GT 4 上安装验证**；手机端 HAP 与双端真机互通也未验证。
+> 当前状态：**手表 Lite 工程已按新包名 `con.xiwei.suyue.gt4` 真实编译并签名成功**，但 **HDEA 只认单 BIN HAP**（旧的多文件 Release 包会在手机侧报「HAP 解压失败」）。Issue #4 已改为对 HAP 内唯一的 `*.bin` 执行 `sign-app -inForm bin` 签**内部 BIN**，再封回单 BIN HAP 并经早已打通的 HDEA 通道实测；本地构建产出 `entry-default-debug-signed.hap`（`SIGNED_TOOL_OK` / `HAP_PACKAGED_OK`；Lite 单 BIN 的 `verify-app` 属工具不支持的已知项，记为 `VERIFY_UNSUPPORTED_FOR_LITE_BIN`，**不是**验签通过）。**签名成功 ≠ 验签成功 ≠ GT4 安装成功**：GT 4 目前仍返回 `errorCode 10`（内部错误），**从未安装成功**；手机端 HAP 与双端真机互通也未验证。详见 [docs/WATCH_INSTALL.md](docs/WATCH_INSTALL.md)。
 
 ## 三个不同的运行环境
 

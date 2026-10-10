@@ -1,36 +1,46 @@
-# GT 4 46mm 安装与构建说明（内部 BIN 签名修复待实机验证）
+# GT 4 46mm 安装与构建说明（Lite 单 BIN 签名 / Issue #4）
 
-> **2026-10-10，Issue #2：暂不可关闭。**
+> **2026-10-10，Issue #4：Lite 单 BIN 签名口径已落地，真机安装待验证（暂不可关闭）。**
 >
-> 20:57 手机日志证实：Debug HAP 通过 HDEA ZIP 格式检查（renameResult:true），
-> 手表文件传输完成（progress 100 / resultCode 207），安装指令下发成功，
-> 但**手表 AppManager 返回 errorCode 10，内部错误**。
-> 手机 HAP 格式和蓝牙传输不是本轮失败的环节。
+> **安装链路事实（20:57 手机日志）**：HDEA（应用调测助手）对单 BIN HAP 的
+> ZIP 检查通过（`renameResult:true`），`entry.bin` 上传到 GT4 完成
+> （progress 100 / `resultCode:207`），安装指令下发成功，但
+> **手表 AppManager 返回 `errorCode 10`（内部错误）**。手机 HAP 格式与蓝牙
+> 传输都不是失败环节——失败发生在**手表侧安装**。
 >
-> 上一轮签名方式有明确的问题：对单 bin 的 HAP 直接调用
-> `hap-sign-tool sign-app`，没有指定 `-inForm`（默认是 `zip`），
-> 仅给**外层 ZIP**签名；HDEA 解包后仅将内部 `entry.bin` 发到 GT4，
-> 手表没有收到外层 ZIP 的签名块。上轮还错误地强制要求
-> 签名前后 BIN 的 SHA256 完全一样，反而掩盖了签名问题。
+> **旧写法的错误**：对单 bin 的 HAP 直接 `sign-app`（默认 `-inForm zip`）
+> 只给**外层 ZIP** 签名；HDEA 解包后只把内部 `entry.bin` 发给 GT4，
+> 手表拿不到外层签名。旧脚本还错误地强制"签名前后 BIN SHA-256 必须相同"，
+> 反而掩盖了签名问题。
 >
-> 最新源码改动（**尚未完成真实签名/真机验证**）：
-> - 从 HAP 解出原始 BIN，读取 0xBE 包头及真实 bundleName，
->   必须与 `con.xiwei.suyue.gt4` 一致；阻止旧模板残留包名；
-> - 执行 `sign-app -inForm bin`，签的是**内部 BIN**；
-> - 执行 `verify-app -inForm bin`，验的是**手表真正收到的 BIN**；
-> - 检查签名使 BIN 实际改变，再把它原样封装为只有一个 BIN 的 HAP；
-> - 手机普通 Stage HAP 仍采用 `-inForm zip`，不改变手机端签名流程。
+> **Issue #4 的修正（已实现，本地构建通过）**：
+> - 从 HAP 解出原始 BIN，解析 0xBE 包头与真实 bundleName，必须等于
+>   `con.xiwei.suyue.gt4`；**不再对整包做文本扫描**——hvigor 会往 Lite 模块
+>   注入模板 `module.package=com.example.myapplication`，而 OpenHarmony
+>   `GtBundleParser` 只读 `app.bundleName`/包头/profile，根本不读
+>   `module.package`，整包扫描纯属误报（Issue #4 明确要求删除该规则）。
+> - 用 `sign-app -inForm bin` 签**内部 BIN**，日志给出工具 SHA-256、参数、
+>   退出码；签的是手表真正收到的那个文件。
+> - 再 `verify-app -inForm bin` 验**手表收到的 BIN**：本机实测该工具对本
+>   0xBE 格式走 ELF 校验路径（`verify: elf magic verify failed`），
+>   **无法独立验签**；对严格识别出的 Lite 0xBE BIN，把**这个已知不兼容错误
+>   降级为显式 WARNING**（`VERIFY_UNSUPPORTED_FOR_LITE_BIN`），
+>   **绝不打印 `Verify success`**，也**不吞**签名失败 / IO 失败 / 身份错误 /
+>   其它未知错误。普通 HAP / Stage / ELF 验签仍然**严格**，不做全局关闭。
+> - 把已签名 BIN 原样封装为**只有这一个 BIN** 的 HAP（不回退外层 ZIP 签名），
+>   并校验包内 BIN 与本次签名产物**逐字节一致**。
+> - 手机普通 Stage HAP 仍是 `-inForm zip`，手机端流程不变。
 >
-> OpenHarmony Lite GT 安装器 `GtBundleInstaller::VerifySignature`
-> 使用 `APPVERI_AppVerify(path)` 验证安装文件本身。
-> 官方签名工具文档允许 `-inForm bin`，而不只是 `zip`。
+> **三种状态必须分开记录**：`SIGNED_TOOL_OK`（sign-app 成功）/
+> `VERIFY_UNSUPPORTED_FOR_LITE_BIN`（本机无法独立验签）/
+> `HAP_PACKAGED_OK`（结构合规）；只有真机装成并启动才算
+> `DEVICE_INSTALL_OK`。**签名成功 ≠ 验签成功 ≠ GT4 安装成功**，
+> 三者不能合并成"已解决"。
 >
 > 官方签名参数：
 > https://github.com/openharmony/docs/blob/master/en/application-dev/security/hapsigntool-guidelines.md
->
 > Lite GT 安装器：
 > https://github.com/openharmony/bundlemanager_bundle_framework_lite/blob/master/services/bundlemgr_lite/src/gt_bundle_installer.cpp
->
 > 错误 10 仍是通用内部错误，不能只凭此认定签名一定是唯一原因。
 
 ## 当前调测步骤
@@ -41,11 +51,17 @@
 tools/build_watch_lite.sh debug
 ```
 
-只有日志包含 `LITE_BIN_IDENTITY_OK`、`verify: Verify success`、
-`LITE_BIN_SIGNED_OK`、`HAP_OK`，才考虑安装
-`apps/watch/entry/build/default/outputs/default/entry-default-debug-signed.hap`。
-如果实际签名工具不支持 `-inForm bin`，应直接失败并提供具体工具错误，
-不能回退到外层 ZIP 签名。
+只有日志**同时**包含 `LITE_BIN_IDENTITY_OK`、`SIGNED_TOOL_OK`、
+`LITE_BIN_SIGNED_OK`、`HAP_OK`、`BIN_SHA256_MATCH`，并出现
+`VERIFY_UNSUPPORTED_FOR_LITE_BIN`（注意：**不是** `verify: Verify success`）
+才考虑安装 `apps/watch/entry/build/default/outputs/default/entry-default-debug-signed.hap`。
+
+`verify-app -inForm bin` 对本 0xBE Lite BIN 必然报
+`verify: elf magic verify failed`，这是**签名工具的输入格式限制**
+（其非 ZIP 校验路径按 ELF 解析），**不是签名无效的证明**；脚本因此把
+该已知不兼容错误降级为显式 WARNING，绝不会伪造 `Verify success`。
+若签名工具报的是**其它**错误（签名失败、IO 错误、身份不符、包名不一致
+等），脚本仍然硬失败退出，**不回退**到外层 ZIP 签名。
 
 **GitHub 源码测试全绿 ≠ BIN 真签名成功 ≠ GT4 安装成功。**
 旧 Release 产物和上一轮仅签外层 ZIP 的 Debug 产物均不可复用。
@@ -134,15 +150,19 @@ type        : debug
   素笺 CI 用的是同一条绕行路径（未签名构建 + `hap-sign-tool sign-app`）。
 - **`verify-app` 的输出文件必须用 `.cer` 后缀**：写成 `.crt` 会报
   `Error Message: Not support file`（实测）。
-- **SHA-256 不可复现**：同一源码重编两次字节数相同但摘要不同
-  （打包写入时间戳）。验收请比对 `.bc` 条目与体积。
+- **产物不可复现**：同一源码重编，SHA-256 必然不同（打包写入时间戳，
+  加上 ECDSA 签名随机性），字节数也可能有细微差异。验收请比对
+  `.bc` 条目、单 BIN 结构与体积，而不是摘要。
 
 ## CI
 
 - `.github/workflows/watch_lite_hap.yml` 运行在自托管 runner（label：`hmos-deveco`）。
+- 本地与 CI 共用同一套签名/验签规则（都走 `tools/build_watch_lite.sh debug`）；
+  已删除对 Lite BIN 必然失败的裸 `verify-app -inForm bin` 重复步骤。
 - 签名材料从 `secrets.WATCH_SIGNING_MATERIAL` 注入，临时落盘、构建后删除、日志不回显。
 - 缺少签名材料时构建失败并明确报出“签名不可用”，不会报告“签名成功”。
-- Artifact 仅上传 HAP 本体，不包含工具链目录。
+- Artifact 仅上传本次新产出的 Debug 签名 HAP（`entry-default-debug-signed.hap`），
+  不含证书、不含工具链目录、不含整个构建目录。
 - `runs-on: [self-hosted, hmos-deveco]` 需要真实注册一台装了 Lite SDK 的
   runner。**没有 runner 时 job 只会长期排队：既不是“构建通过”，也不是
   “构建失败”，而是“从未运行”**——不能把排队当作绿灯。GitHub 托管机
@@ -152,10 +172,38 @@ type        : debug
   用 glob 执行 `tests/*.test.mjs` 全量用例，其中
   `tests/source-contract.test.mjs` 会拦下"正则字面量"这类会让快照静默失败的写法。
 
-## 安装到 GT 4（待验证路径）
+## 安装到 GT 4（HDEA 单 BIN 流程 + 失败取日志）
+
+**为什么必须是单 BIN HAP**：HDEA 只接受"解压后恰好一个 `*.bin`"的 HAP；
+多文件 Release 包会在手机侧直接报「HAP 解压失败」（历史日志
+`AppListAdapter: ...not one standard hap`）。所以只能用
+`tools/build_watch_lite.sh debug` 产出的**单 BIN** Debug 签名 HAP。
+
+```bash
+# 1) 构建（产出单 BIN 的 Debug 签名 HAP）
+tools/build_watch_lite.sh debug
+
+# 2) 推到已授权、且已配对手表的中间手机（示例：nova 7 Pro）
+adb -s TNL0220908013936 push \
+  apps/watch/entry/build/default/outputs/default/entry-default-debug-signed.hap \
+  /sdcard/haps/suyue-watch-con.xiwei.suyue.gt4-debug-signed.hap
+```
+
+3) 打开手机「应用调测助手」→ 该文件 → 选择配对的 HUAWEI WATCH GT 4 →
+   解包 → 蓝牙传输 → 手表安装。`/sdcard/haps/` 里**只保留这一个**签名包，
+   旧的 Release/未签名包会被误点并报「HAP 解压失败」。
+
+**失败时如何取日志**（错误码由助手转发，手表侧细节要另取）：
+- 手机侧：`adb logcat -c` → 重新安装复现 →
+  `adb logcat -d -v threadtime > gt4-install.log`。关键行：
+  `DevecoAssistant|AppListAdapter`（点击/解包/传输进度）、
+  `AppManagerReceiver errorCode :N`。助手只**转发**手表返回的码
+  （如 10=内部错误、27=与旧版本签名信息不匹配、28–35=签名验证失败）。
+- 手表侧：需用 DevEco / hdc 取 GT4 的 hilog，才能看到真正的安装失败原因；
+  手机日志只有那个转发码，不构成根因结论。
 
 候选路径（按优先级）：
-1. DevEco Assistant / HDEA 经配对手机中转安装到 GT 4。
+1. DevEco Assistant / HDEA 经配对手机中转安装到 GT 4（本仓库当前主路径）。
 2. 若 Pocket 2（HarmonyOS 7）无法运行对应安装助手，寻找实际兼容的安卓/鸿蒙旧手机做中转。
 
 安装后验证清单：
@@ -183,8 +231,10 @@ type        : debug
   `deviceId: 'remote'` 取自上游 Lite 示例、**从未真机确认**。现已改为
   优先采用从订阅回调探测到的真实 `deviceId`，探测不到才回退并告警一次；
   这条回执路径仍未验证。
-- **CI 的签名代码已同步**：`watch_lite_hap.yml` 已改为 unsigned HAP →
-  `hap-sign-tool sign-app` → `verify-app`，但自托管 Runner 仍排队，尚无新包名构建证据。
+- **CI 签名代码已与本机同源**：`watch_lite_hap.yml` 直接调用
+  `tools/build_watch_lite.sh debug`（复用同一套 sign/verify 规则），并
+  **删除了**对 Lite BIN 必然失败的裸 `verify-app -inForm bin` 步骤；
+  自托管 Runner 仍排队，尚无新包名构建证据。
 - 手机包名已改为 `com.xiwei.suyue`（对应现有 AGC 应用与证书），
   但**手机 HAP 仍未构建**；手表包名已改为 `con.xiwei.suyue.gt4`，
   需要在 AGC 注册相同包名并签发包含 GT4 UDID 的独立调试 Profile。
