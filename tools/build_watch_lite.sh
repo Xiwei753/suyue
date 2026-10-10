@@ -51,7 +51,7 @@ if [ -z "$HAP" ]; then
   exit 1
 fi
 
-echo "HAP_PATH=$REPO_ROOT/apps/watch/$HAP"
+echo "BUILT_UNSIGNED_HAP_PATH=$REPO_ROOT/apps/watch/$HAP"
 
 # ---- 签名（issue #2 实测路径）----------------------------------------
 # 为什么不用 hvigor 的 signingConfigs：在 Lite（legacyAppTasks/
@@ -173,6 +173,7 @@ if [ -n "$SIGN_P12" ] || [ -n "$SIGN_CER" ] || [ -n "$SIGN_PROFILE" ]; then
   if [ "$SIGN_STATUS" = "0" ]; then
     HAP="$SIGNED_HAP"
     UNSIGNED=0
+    echo "SIGNED_LITE_HAP_PATH=$REPO_ROOT/apps/watch/$HAP"
   elif [ "$SIGN_STATUS" = "3" ]; then
     cat >&2 <<'MSG'
 
@@ -209,7 +210,7 @@ if [ "$UNSIGNED" = "1" ]; then
   2. 找到了 profile，但它授权的包名与本 HAP 不一致，已拒绝签名。
 
 材料就位后本脚本会自动走已验证的路径：未签名构建 →
-hap-sign-tool sign-app → verify-app，产物名为
+hap-sign-tool sign-app -inForm bin → verify-app -inForm bin → 单 bin ZIP 封装，产物名为
 entry-default-<mode>-signed.hap。
 
 签名材料说明与包名注意事项见 signing/README.md。

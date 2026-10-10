@@ -243,6 +243,16 @@ if [ "$DEVICE" = "liteWearable" ] && [ "$SINGLE_BIN" = "0" ]; then
 fi
 
 if [ "$SINGLE_BIN" = "1" ]; then
+  if [ -z "$BUNDLE" ]; then
+    echo "FAIL: Lite single-bin header inspection needs --bundle" >&2
+    exit 1
+  fi
+  # 直接读取安装时会传到手表的 bin 头部包名；不能仅看源码 config.json。
+  if ! python3 "$(dirname "$0")/../tools/check_lite_bin.py" \
+      --hap "$HAP" --bundle "$BUNDLE"; then
+    echo "FAIL: Lite BIN 的真实包名或头部不正确。" >&2
+    exit 1
+  fi
   echo "WARN: 单 .bin HAP 不含顶层 manifest/.bc；包名、指纹、设备类型仅根据本次源码 config.json 校验，不能冒充已验证 bin 内数据。" >&2
 fi
 

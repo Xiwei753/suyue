@@ -1,39 +1,54 @@
-# GT 4 46mm 安装与构建说明（Debug 单 bin 正在实机验证）
+# GT 4 46mm 安装与构建说明（内部 BIN 签名修复待实机验证）
 
-> **2026-10-10 最新状态（Issue #2）：暂不可关闭。**
-> - 旧的 `entry-default-release-signed.hap` 虽曾通过官方 `verify-app`，但
->   **HDEA 在手机端就报 `not one standard hap`**；不能再作为 GT4 安装包。
-> - 用户新实测 `tools/build_watch_lite.sh debug`：hvigor 确实生成
->   `entry-default-unsigned.hap`，ZIP 顶层**恰好一个
->   `entry-default-unsigned.bin`**，符合已反编译的 HDEA 文件形状判断；
->   然而旧签名/校验工具只认 ZIP 顶层 `config.json`，因此未产生可安装的
->   已签名 Debug 包。未签名尝试出现“安装失败 10，内部错误”，**根因尚未证实**。
-> - 现已修复 `tools/sign_hap.sh` 和 `tests/build_artifact_check.sh`：
->   对单 bin 模式根据**本次构建的源码 config.json**核对包名及设备类型，
->   保持 profile 包名一致；完成 `sign-app`、`verify-app` 后再检查
->   已签 HAP ZIP **仍然只有原来那一个 .bin，且其 SHA-256 未变化**。
->   多文件 HAP 仍必须从**包内**读取 config/module.json。
-> - **源码级 CI 测试通过 ≠ 手表端安装成功**。必须本地真实签名生成
->   `entry-default-debug-signed.hap`，然后经同一 nova 7 Pro/HDEA 实测。
+> **2026-10-10，Issue #2：暂不可关闭。**
+>
+> 20:57 手机日志证实：Debug HAP 通过 HDEA ZIP 格式检查（renameResult:true），
+> 手表文件传输完成（progress 100 / resultCode 207），安装指令下发成功，
+> 但**手表 AppManager 返回 errorCode 10，内部错误**。
+> 手机 HAP 格式和蓝牙传输不是本轮失败的环节。
+>
+> 上一轮签名方式有明确的问题：对单 bin 的 HAP 直接调用
+> `hap-sign-tool sign-app`，没有指定 `-inForm`（默认是 `zip`），
+> 仅给**外层 ZIP**签名；HDEA 解包后仅将内部 `entry.bin` 发到 GT4，
+> 手表没有收到外层 ZIP 的签名块。上轮还错误地强制要求
+> 签名前后 BIN 的 SHA256 完全一样，反而掩盖了签名问题。
+>
+> 最新源码改动（**尚未完成真实签名/真机验证**）：
+> - 从 HAP 解出原始 BIN，读取 0xBE 包头及真实 bundleName，
+>   必须与 `con.xiwei.suyue.gt4` 一致；阻止旧模板残留包名；
+> - 执行 `sign-app -inForm bin`，签的是**内部 BIN**；
+> - 执行 `verify-app -inForm bin`，验的是**手表真正收到的 BIN**；
+> - 检查签名使 BIN 实际改变，再把它原样封装为只有一个 BIN 的 HAP；
+> - 手机普通 Stage HAP 仍采用 `-inForm zip`，不改变手机端签名流程。
+>
+> OpenHarmony Lite GT 安装器 `GtBundleInstaller::VerifySignature`
+> 使用 `APPVERI_AppVerify(path)` 验证安装文件本身。
+> 官方签名工具文档允许 `-inForm bin`，而不只是 `zip`。
+>
+> 官方签名参数：
+> https://github.com/openharmony/docs/blob/master/en/application-dev/security/hapsigntool-guidelines.md
+>
+> Lite GT 安装器：
+> https://github.com/openharmony/bundlemanager_bundle_framework_lite/blob/master/services/bundlemgr_lite/src/gt_bundle_installer.cpp
+>
+> 错误 10 仍是通用内部错误，不能只凭此认定签名一定是唯一原因。
 
-## 最新调试步骤
+## 当前调测步骤
+
+请在本机保持原有证书、手表 Profile 和密钥不变，运行：
 
 ```bash
 tools/build_watch_lite.sh debug
 ```
 
-脚本会清理旧手表构建、构建 Debug 单 bin、读取本次源码清单校验
-`con.xiwei.suyue.gt4` 与手表 Debug Profile 的包名一致、
-执行 `hap-sign-tool sign-app` 和 `verify-app`，并确认签名后
-**单 bin 的数量、文件名、内容摘要均未变化**。
-签名材料放在 `signing/shared/` 与 `signing/watch/`，不提交仓库。
-**没有签名材料会明确失败退出，不再给出可误用的成功结论。**
+只有日志包含 `LITE_BIN_IDENTITY_OK`、`verify: Verify success`、
+`LITE_BIN_SIGNED_OK`、`HAP_OK`，才考虑安装
+`apps/watch/entry/build/default/outputs/default/entry-default-debug-signed.hap`。
+如果实际签名工具不支持 `-inForm bin`，应直接失败并提供具体工具错误，
+不能回退到外层 ZIP 签名。
 
-安装时只选 `apps/watch/entry/build/default/outputs/default/entry-default-debug-signed.hap`，
-不要选 `entry-default-unsigned.hap` 或旧 Release 包。若仍报内部错误 10，
-要结合新的 HDEA logcat 和真实 Debug 产物区分**手机包解析/签名/手表安装**环节。
-由于单 bin 内没有顶层 manifest，这一模式下的源码包名、指纹检查
-不能宣称已从 bin 实际解出身份；签名验证与真机验证仍是独立关卡。
+**GitHub 源码测试全绿 ≠ BIN 真签名成功 ≠ GT4 安装成功。**
+旧 Release 产物和上一轮仅签外层 ZIP 的 Debug 产物均不可复用。
 
 ## 前置条件
 
