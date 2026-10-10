@@ -18,6 +18,7 @@ import com.xiwei.suyue.databinding.ItemBookBinding
 import com.xiwei.suyue.importer.BookImportService
 import com.xiwei.suyue.model.BookMeta
 import com.xiwei.suyue.model.BookStatus
+import com.xiwei.suyue.model.SendPolicy
 import com.xiwei.suyue.model.TransferProgress
 import com.xiwei.suyue.model.TransferState
 import com.xiwei.suyue.storage.BookRepository
@@ -44,6 +45,8 @@ class MainActivity : AppCompatActivity() {
     private var selectedDevice: Int = -1
     private var sending: Boolean = false
     private var activeTransferId: String = ""
+    // P0-D：只有回执监听注册成功才允许发送（否则收不到 RESULT，只能假成功）。
+    private var receiverReady: Boolean = false
 
     private val pickBook = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -103,7 +106,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun canSend(): Boolean =
-        selectedDevice >= 0 && PeerIdentity.isConfigured() && !sending
+        selectedDevice >= 0 && PeerIdentity.isConfigured() && receiverReady && !sending
 
     private fun importBook(uri: Uri) {
         binding.pickedName.text = uri.lastPathSegment ?: "已选择文件"
@@ -134,14 +137,24 @@ class MainActivity : AppCompatActivity() {
             .setMessage("确定删除《${book.title}》？此操作不可恢复。")
             .setNegativeButton("取消", null)
             .setPositiveButton("删除") { _, _ ->
-                repository.remove(book.bookId)
-                refresh()
-                binding.pickStatus.text = "已删除《${book.title}》"
+                try {
+                    repository.remove(book.bookId)
+                    refresh()
+                    binding.pickStatus.text = "已删除《${book.title}》"
+                } catch (e: Exception) {
+                    Log.e(tag, "remove failed bookId=${book.bookId}: ${e.message}")
+                    binding.pickStatus.text = "删除失败：书库索引写入失败，请重试"
+                    refresh()
+                }
             }
             .show()
     }
 
     private fun refreshDevices() {
+        // 设备列表刷新/切换时，旧设备的回执监听必须解除（P0-D），
+        // 避免把旧设备的回执误当成当前目标的回执。
+        gateway.unregisterReceiver()
+        receiverReady = false
         binding.deviceStatus.text = "正在请求手表访问授权……"
         lifecycleScope.launch {
             val granted = gateway.ensurePermission()
@@ -201,23 +214,34 @@ class MainActivity : AppCompatActivity() {
     private fun selectDevice(index: Int) {
         if (index < 0 || index >= devices.size) return
         selectedDevice = index
+        receiverReady = false
         val device = devices[index]
         binding.deviceStatus.text = "已选择：${device.target.name}"
         if (!PeerIdentity.isConfigured()) {
+            gateway.unregisterReceiver()
             binding.deviceStatus.text = "已选择：${device.target.name}；手表签名指纹未配置，发送保持禁用"
+            refresh()
+            return
         }
-        // 注册手表 → 手机的消息接收（RESULT 回执）。remoteApp 必须是对端（手表）身份。
-        if (PeerIdentity.isConfigured()) {
-            gateway.registerReceiver(
+        // 注册手表 → 手机的消息接收（RESULT 回执），必须是对端（手表）身份。
+        // P0-D：等待注册结果，成功前不允许发送。
+        lifecycleScope.launch {
+            val ok = gateway.registerReceiver(
                 device.device,
                 PeerIdentity.WATCH_BUNDLE_NAME,
                 PeerIdentity.watchFingerprint
             ) { message ->
-                val data = message.data ?: return@registerReceiver
-                transferService.onMessageFromWatch(data)
+                val data = message.data
+                if (data != null) transferService.onMessageFromWatch(data)
             }
+            receiverReady = ok
+            if (!ok) {
+                Log.w(tag, "registerReceiver failed for ${device.target.name}")
+                binding.deviceStatus.text =
+                    "已选择：${device.target.name}；回执监听注册失败，发送禁用"
+            }
+            refresh()
         }
-        refresh()
     }
 
     private fun sendBook(book: BookMeta) {
@@ -225,8 +249,8 @@ class MainActivity : AppCompatActivity() {
             binding.transferText.text = "发送不可用：请先选择设备并配置手表指纹"
             return
         }
-        if (book.status != BookStatus.READY) {
-            binding.transferText.text = "书籍未就绪，不能发送"
+        if (!SendPolicy.isSendable(book.status)) {
+            binding.transferText.text = "书籍未就绪，不能发送（导入中或导入失败）"
             return
         }
         val device = devices[selectedDevice]
@@ -247,22 +271,38 @@ class MainActivity : AppCompatActivity() {
             updateSendingState()
             if (ok) {
                 binding.transferText.text = "《${book.title}》手表已确认入库"
-                repository.markStatus(book.bookId, BookStatus.SENT)
+                markStatusSafely(book.bookId, BookStatus.SENT, null)
             } else {
                 binding.transferText.text = "发送失败：手表未确认入库"
-                repository.markStatus(book.bookId, BookStatus.TRANSFER_FAILED, "watch did not confirm")
+                markStatusSafely(book.bookId, BookStatus.TRANSFER_FAILED, "watch did not confirm")
             }
             refresh()
         }
     }
 
+    // P1-7：索引写入改为 AtomicFile 后，失败会抛 IOException；
+    // 这里必须捕获并向用户暴露，不能静默丢索引。
+    private fun markStatusSafely(bookId: String, status: BookStatus, lastError: String?) {
+        try {
+            repository.markStatus(bookId, status, lastError)
+        } catch (e: Exception) {
+            Log.e(tag, "markStatus failed bookId=$bookId status=$status: ${e.message}")
+            binding.pickStatus.text = "书库索引写入失败，状态未保存（重启可能回退）"
+        }
+    }
+
+    // P1-6：进度回调可能来自 SDK 线程，必须切回主线程再碰 View，
+    // 且 Activity 已销毁时不再写 View。
     private fun onTransferProgress(progress: TransferProgress) {
-        if (progress.transferId.isNotEmpty()) activeTransferId = progress.transferId
-        val percentText = if (progress.percent > 0 &&
-            progress.state == TransferState.SENDING
-        ) "（${progress.percent}%）" else ""
-        binding.transferText.text = progress.message + percentText
-        updateSendingState()
+        runOnUiThread {
+            if (isDestroyed || isFinishing) return@runOnUiThread
+            if (progress.transferId.isNotEmpty()) activeTransferId = progress.transferId
+            val percentText = if (progress.percent > 0 &&
+                progress.state == TransferState.SENDING
+            ) "（${progress.percent}%）" else ""
+            binding.transferText.text = progress.message + percentText
+            updateSendingState()
+        }
     }
 
     private fun updateSendingState() {
@@ -272,11 +312,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun cancelSend() {
         if (!sending || activeTransferId.isEmpty()) return
-        binding.transferText.text = "正在取消传输……"
+        binding.transferText.text = "正在取消本次等待……"
         val transferId = activeTransferId
         lifecycleScope.launch {
             transferService.cancel(transferId)
-            binding.transferText.text = "已请求取消，等待手表确认清理"
+            // P0-E：当前 Wear Engine SDK（5.0.0.300/301）没有传输层取消 API，
+            // 只能说“停止等待并通知手表清理”，不能声称“文件传输已停止”。
+            binding.transferText.text =
+                "已停止等待并通知手表清理（当前 SDK 无法中断已发出的文件流）"
         }
     }
 }

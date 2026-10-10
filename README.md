@@ -72,7 +72,7 @@ tests/            与系统 SDK 无关的静态检查/分页测试
 
 ## 安卓传书 App（`apps/android`）
 
-议题 #3 面向 nova 7 Pro（Android/HMS）的「手机」端：一部手机同时装 Huawei Health、应用调测助手（DevEco Assistant）与素阅 APK，选择 TXT/EPUB → 经 Wear Engine 传给 GT 4 → 以 GT 4 回 `RESULT ok=true` 为入库成功。它是独立 Gradle 工程、独立 APK 签名，**不使用** HAP 的 `.p7b` profile。
+议题 #3 面向 nova 7 Pro（Android/HMS）的「手机」端：一部手机同时装 Huawei Health、应用调测助手（DevEco Assistant）与素阅 APK，选择 TXT/EPUB → 经 Wear Engine 传给 GT 4 → 以 GT 4 回 `RESULT ok=true` 为入库成功。它是独立 Gradle 工程（`applicationId = com.xiwei.suyue.android`，AGC 登记的 Android 包名）、独立 APK 签名，**不使用** HAP 的 `.p7b` profile。
 
 - 取/装 APK：`tools/build_android_apk.sh debug`（本机 Gradle + Android SDK，产物 `apps/android/app/build/outputs/apk/debug/app-debug.apk`）；或从 CI `android-apk` workflow 下载。安装：`adb install -r app-debug.apk`。
 - 诚实边界：**APK 构建成功 ≠ 可安装成功 ≠ 能与 GT 4 配对传书**。debug 包用本机调试证书签名，其指纹不是手表端 `supportLists` / Wear Engine 认可的正式手机指纹；真机配对需要 AGC 注册的 keystore 与注入的手表指纹（见 [apps/android/README.md](apps/android/README.md)）。

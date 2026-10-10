@@ -7,7 +7,10 @@
 // Android 侧 GBK/GB18030 由系统 Charset 提供（Android 真机可用）。
 package com.xiwei.suyue.importer
 
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
 import java.nio.charset.Charset
+import java.nio.charset.CodingErrorAction
 
 data class DecodedText(val text: String, val encoding: String)
 
@@ -62,17 +65,28 @@ object TextDecodeService {
         return "gbk"
     }
 
-    private fun decodeWith(bytes: ByteArray, charset: Charset): String {
-        var text = String(bytes, charset)
-        if (text.isNotEmpty() && text[0] == '\uFEFF') text = text.substring(1)
-        return text
+    // 严格解码（P1-8）：遇到非法字节 / 不可映射字符直接失败并返回 null，
+    // 不用 U+FFFD 静默替换。旧实现 `String(bytes, charset)` 会把坏字节
+    // 悄悄替换成“�”，用户在书里看到乱码却得不到任何提示。
+    private fun decodeStrict(bytes: ByteArray, charset: Charset): String? {
+        val decoder = charset.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+        return try {
+            var text = decoder.decode(ByteBuffer.wrap(bytes)).toString()
+            if (text.isNotEmpty() && text[0] == '\uFEFF') text = text.substring(1)
+            text
+        } catch (e: CharacterCodingException) {
+            null
+        }
     }
 
     private fun decodeGbk(bytes: ByteArray): String? {
         for (name in listOf("GB18030", "GBK", "GB2312")) {
             try {
                 val cs = Charset.forName(name)
-                return decodeWith(bytes, cs)
+                val text = decodeStrict(bytes, cs)
+                if (text != null) return text
             } catch (e: Exception) {
                 // 继续尝试下一个候选。
             }
@@ -84,11 +98,11 @@ object TextDecodeService {
     fun decodeToText(bytes: ByteArray): DecodedText? {
         val encoding = detectEncoding(bytes)
         val text = when (encoding) {
-            "utf-8" -> decodeWith(bytes, Charsets.UTF_8)
-            "utf-16le" -> decodeWith(bytes, Charsets.UTF_16LE)
-            "utf-16be" -> decodeWith(bytes, Charsets.UTF_16BE)
-            else -> decodeGbk(bytes) ?: return null
-        }
+            "utf-8" -> decodeStrict(bytes, Charsets.UTF_8)
+            "utf-16le" -> decodeStrict(bytes, Charsets.UTF_16LE)
+            "utf-16be" -> decodeStrict(bytes, Charsets.UTF_16BE)
+            else -> decodeGbk(bytes)
+        } ?: return null
         return DecodedText(text, encoding)
     }
 }

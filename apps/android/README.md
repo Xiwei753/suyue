@@ -28,7 +28,7 @@ apps/android/
   gradle/wrapper/…                     独立 Gradle（8.11.1）+ AGP 8.9.2
   gradlew / gradlew.bat
   app/
-    build.gradle.kts                   applicationId = com.xiwei.suyue
+    build.gradle.kts                   applicationId = com.xiwei.suyue.android
     proguard-rules.pro                 保留 com.huawei.wearengine.** / com.huawei.hmf.**
     src/main/AndroidManifest.xml       仅 INTERNET/ACCESS_NETWORK_STATE；<queries> 华为健康/HMS
     src/main/res/…                     「素阅」中文界面、颜色、图标
@@ -59,9 +59,19 @@ tools/build_android_apk.sh debug     # → app/build/outputs/apk/debug/app-debug
 tools/build_android_apk.sh release   # 需签名环境变量，见下
 ```
 
-脚本会校验：APK 是 ZIP 且 CRC 通过、`applicationId=com.xiwei.suyue`、
-非零字节、用 `apksigner` 打印签名指纹，并打印 `APK_OK …` 结论行。
-**缺工具链会大声失败，不伪造成功。**
+脚本会校验：APK 是 ZIP 且 CRC 通过、`applicationId=com.xiwei.suyue.android`、
+非零字节、**`apksigner` 退出码为 0 且签名有效**，并打印签名指纹与 `APK_OK …` 结论行。
+**release 无正式签名会直接失败**（不会出现「未签名也 OK」）；debug 包可安装做界面/导入测试，
+但结论行会标注 `wear_engine_authorized=no(debug:UI/import-only)`。**缺工具链会大声失败，不伪造成功。**
+
+### 单元测试
+
+```bash
+cd apps/android && ./gradlew :app:testDebugUnitTest
+```
+
+覆盖：回执关联（`ReceiptMatcher`，串号/错书/迟到/重复/失败）、可发送状态（`SendPolicy`，含重发）、
+严格编码解码（`TextDecodeService`，UTF-8/GBK/BOM/非法字节）。
 
 ### CI
 
@@ -72,12 +82,12 @@ tools/build_android_apk.sh release   # 需签名环境变量，见下
 
 | 角色 | 包名 | 说明 |
 | --- | --- | --- |
-| 手机（本 App） | `com.xiwei.suyue` | `applicationId`；与手表端登记的「手机身份」一致 |
+| 手机（本 App） | `com.xiwei.suyue.android` | AGC 上为本 APK 登记的包名（`applicationId`）；**与 HarmonyOS 手机 `com.xiwei.suyue` 区分** |
 | 手表（对端） | `con.xiwei.suyue.gt4` | 注意是 **`con`** 不是 `com`；`WATCH_BUNDLE_NAME` |
 
 - **同包名 ≠ 同签名**。手表只认可某个**具体证书指纹**；本 App 要能配对，
   其 APK 的签名证书指纹必须与手表 `supportLists` / Wear Engine 登记的
-  手机指纹一致，且该指纹需在 AGC 完成 Wear Engine 注册。
+  **`com.xiwei.suyue.android` 手机指纹**一致，且该指纹需在 AGC 完成 Wear Engine 注册。
 - **正式签名（release）** 通过环境变量配置，**私钥/口令/keystore 绝不入库**
   （本仓库 `.gitignore` 已挡 `*.jks/*.keystore/*.apk`）：
 

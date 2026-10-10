@@ -31,16 +31,18 @@ class BookTransferService(private val gateway: WearEngineGateway) {
 
     private val tag = "suyue/Transfer"
 
-    data class Receipt(val ok: Boolean, val reason: String?)
-
     private class InFlight(
         val transferId: String,
+        val bookId: String,
         val watch: WatchDevice,
         val peerBundle: String,
         val peerFingerprint: String
     )
 
     private var inFlight: InFlight? = null
+
+    // 回执关联（P0-C）：只有 transferId + bookId 同时命中当前等待者才计入成功。
+    private val matcher = ReceiptMatcher()
 
     private val cancelled: MutableSet<String> = Collections.synchronizedSet(HashSet())
     private val receipts: MutableMap<String, Receipt> = Collections.synchronizedMap(HashMap())
@@ -49,6 +51,8 @@ class BookTransferService(private val gateway: WearEngineGateway) {
     private var pendingResult: CompletableDeferred<Receipt>? = null
 
     // 手表回执入口：页面把 Wear Engine 消息回调路由到这里。
+    // 仅当 transferId 与 bookId 都与当前在途传输一致时，才唤醒等待者；
+    // 串号 / 别的书 / 取消或重试之后到达的回执一律忽略（不判成功）。
     fun onMessageFromWatch(content: ByteArray) {
         val text = try {
             String(content, Charsets.UTF_8)
@@ -62,12 +66,21 @@ class BookTransferService(private val gateway: WearEngineGateway) {
         }
         if (json.optInt("v", -1) != 0 || json.optString("type") != "RESULT") return
         val transferId = json.optString("transferId", "")
-        if (transferId.isEmpty()) return
+        val bookId = json.optString("bookId", "")
         val ok = json.optBoolean("ok", false)
         val reason = if (ok) null else json.optString("reason", TransferErrorCode.E_PROTOCOL)
-        val receipt = Receipt(ok, reason)
+        val outcome = matcher.onResult(transferId, bookId, ok, reason)
+        if (!outcome.matched) {
+            Log.w(
+                tag,
+                "ignore unmatched RESULT transferId=$transferId bookId=$bookId " +
+                    "(pending=${matcher.pending})"
+            )
+            return
+        }
+        val receipt = outcome.receipt ?: return
         receipts[transferId] = receipt
-        Log.i(tag, "RESULT transferId=$transferId ok=$ok reason=${reason ?: "-"}")
+        Log.i(tag, "RESULT matched transferId=$transferId bookId=$bookId ok=$ok reason=${reason ?: "-"}")
         val active = pendingResult
         if (active != null && active.isActive) active.complete(receipt)
     }
@@ -119,6 +132,10 @@ class BookTransferService(private val gateway: WearEngineGateway) {
         )
         onProgress(progress)
 
+        // P0-B：先显式配置对端身份（包名 + 指纹），再 ping / 发送。
+        // 旧实现在没有 configurePeer 的情况下直接 ping，对端身份未设置。
+        gateway.configurePeer(peerBundle, peerFingerprint)
+
         // 发送前提：手表应用已安装且运行。区分“未安装/未运行/异常”。
         val status = try {
             gateway.pingApp(watch.device)
@@ -145,7 +162,7 @@ class BookTransferService(private val gateway: WearEngineGateway) {
             return false
         }
 
-        inFlight = InFlight(transferId, watch, peerBundle, peerFingerprint)
+        inFlight = InFlight(transferId, book.bookId, watch, peerBundle, peerFingerprint)
 
         var attempt = 0
         while (attempt <= retry) {
@@ -157,23 +174,29 @@ class BookTransferService(private val gateway: WearEngineGateway) {
             attempt += 1
 
             // 每轮注册全新回执等待者（上传阶段与回执阶段分开计时）。
+            // P0-C：本轮 (transferId, bookId) 写入 matcher，只有同时命中才判成功。
             val deferred = CompletableDeferred<Receipt>()
             pendingResult = deferred
+            matcher.begin(transferId, book.bookId)
 
             try {
                 // HELLO
                 progress = progress.copy(state = TransferState.CONNECTING, message = "握手（HELLO）")
                 onProgress(progress)
-                gateway.sendMessage(
-                    watch.device, peerBundle, peerFingerprint, helloJson()
-                )
+                withTimeout(MESSAGE_TIMEOUT_MS) {
+                    gateway.sendMessage(
+                        watch.device, peerBundle, peerFingerprint, helloJson()
+                    )
+                }
 
                 // BOOK_META：章节偏移基于 UTF-8 字节。
                 progress = progress.copy(state = TransferState.SENDING, message = "发送书籍元数据")
                 onProgress(progress)
-                gateway.sendMessage(
-                    watch.device, peerBundle, peerFingerprint, bookMetaJson(transferId, book)
-                )
+                withTimeout(MESSAGE_TIMEOUT_MS) {
+                    gateway.sendMessage(
+                        watch.device, peerBundle, peerFingerprint, bookMetaJson(transferId, book)
+                    )
+                }
 
                 // 文件通道传输整本规范化正文（上传阶段独立超时）。
                 progress = progress.copy(state = TransferState.SENDING, message = "通过文件通道传输正文")
@@ -247,6 +270,7 @@ class BookTransferService(private val gateway: WearEngineGateway) {
 
     private fun finish(transferId: String) {
         pendingResult = null
+        matcher.clear()
         if (inFlight?.transferId == transferId) inFlight = null
         cancelled.remove(transferId)
     }
@@ -297,6 +321,9 @@ class BookTransferService(private val gateway: WearEngineGateway) {
     }
 
     companion object {
+        // 控制消息（HELLO/BOOK_META/ERROR）发送的单阶段超时，避免 SDK 不回调时挂死。
+        private const val MESSAGE_TIMEOUT_MS = 15_000L
+
         // 不可通过重试解决的错误。
         private val NON_RETRYABLE = setOf(
             TransferErrorCode.E_DIGEST_MISMATCH,

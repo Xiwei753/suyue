@@ -50,7 +50,9 @@ class WearEngineGateway(private val context: Context) {
         addOnFailureListener { e -> if (cont.isActive) cont.resumeWithException(e) }
     }
 
-    private fun configurePeer(bundleName: String, fingerprint: String) {
+    // 配置对端（手表）身份。发送 / 收信 / ping 前必须调用，
+    // 保证三者使用同一 device + 同一对端包名/指纹。
+    fun configurePeer(bundleName: String, fingerprint: String) {
         p2pClient.setPeerPkgName(bundleName)
         if (fingerprint.isNotBlank()) p2pClient.setPeerFingerPrint(fingerprint)
     }
@@ -155,6 +157,8 @@ class WearEngineGateway(private val context: Context) {
         onProgress: ((Int) -> Unit)?
     ): Unit = suspendCancellableCoroutine { cont ->
         try {
+            // 注意：send() 返回的 Task 失败与 SendCallback 的回调失败是两条路径，
+            // 都要处理，否则 SDK 不回调时协程会挂死（P0-B）。
             p2pClient.send(device, message, object : SendCallback {
                 override fun onSendProgress(progress: Long) {
                     val percent = progress.coerceIn(0, 100).toInt()
@@ -166,24 +170,33 @@ class WearEngineGateway(private val context: Context) {
                     if (code == WearEngineErrorCode.ERROR_CODE_COMM_SUCCESS) {
                         cont.resume(Unit)
                     } else {
+                        Log.w(
+                            tag,
+                            "send result failed code=$code " +
+                                "(${WearEngineErrorCode.getErrorMsgFromCode(code)})"
+                        )
                         cont.resumeWithException(
                             WearEngineFailure(code, "发送失败（code=$code）")
                         )
                     }
                 }
-            })
+            }).addOnFailureListener { e ->
+                Log.w(tag, "send task failed: ${e.message}")
+                if (cont.isActive) cont.resumeWithException(e)
+            }
         } catch (e: Exception) {
             if (cont.isActive) cont.resumeWithException(e)
         }
     }
 
     // 注册手表 → 手机消息接收（RESULT 回执）。
-    fun registerReceiver(
+    // P0-D：这是可等待的，返回是否注册成功；注册失败时 UI 不得允许发送。
+    suspend fun registerReceiver(
         device: Device,
         peerBundle: String,
         peerFingerprint: String,
         onMessage: (Message) -> Unit
-    ) {
+    ): Boolean {
         configurePeer(peerBundle, peerFingerprint)
         unregisterReceiver()
         val newReceiver = object : Receiver {
@@ -191,17 +204,24 @@ class WearEngineGateway(private val context: Context) {
                 onMessage(message)
             }
         }
-        receiver = newReceiver
-        p2pClient.registerReceiver(device, newReceiver)
-            .addOnFailureListener { e -> Log.w(tag, "registerReceiver failed: ${e.message}") }
+        return try {
+            p2pClient.registerReceiver(device, newReceiver).awaitTask()
+            receiver = newReceiver
+            true
+        } catch (e: Exception) {
+            Log.w(tag, "registerReceiver failed: ${e.message}")
+            receiver = null
+            false
+        }
     }
 
     fun unregisterReceiver() {
         val current = receiver ?: return
         try {
             p2pClient.unregisterReceiver(current)
+                .addOnFailureListener { e -> Log.w(tag, "unregisterReceiver failed: ${e.message}") }
         } catch (e: Exception) {
-            Log.w(tag, "unregisterReceiver failed: ${e.message}")
+            Log.w(tag, "unregisterReceiver threw: ${e.message}")
         }
         receiver = null
     }

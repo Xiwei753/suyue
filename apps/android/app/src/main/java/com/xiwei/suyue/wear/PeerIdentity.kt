@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 对端（GT 4）身份配置。
-// 包名与议题 #3 / #2 约定保持一致：
-//   手表 bundleName = con.xiwei.suyue.gt4   （con，不是 com）
-//   手机 bundleName = com.xiwei.suyue        （本 Android APK 同角色）
-// 注意：包名一致 ≠ 签名一致。手表侧 supportLists 只信任“手机包名:手机证书指纹”，
+// 包名约定（issues #2/#3）：
+//   手表 bundleName = con.xiwei.suyue.gt4      （con，不是 com）
+//   本 Android APK  = com.xiwei.suyue.android   （AGC 登记的 Android 包名，
+//                                              与 HarmonyOS 手机 com.xiwei.suyue 区分）
+// 注意：包名一致 ≠ 签名一致。手表侧 supportLists 只信任“对端包名:对端证书指纹”，
 // 因此本 APK 的真实签名指纹必须由 #2 侧登记进手表 supportLists（见 docs/ANDROID_APK.md）。
 package com.xiwei.suyue.wear
 
@@ -15,7 +16,7 @@ import java.security.MessageDigest
 object PeerIdentity {
 
     const val WATCH_BUNDLE_NAME = "con.xiwei.suyue.gt4"
-    const val PHONE_BUNDLE_NAME = "com.xiwei.suyue"
+    const val PHONE_BUNDLE_NAME = "com.xiwei.suyue.android"
 
     // 手表应用证书指纹（Wear Engine setPeerFingerPrint 使用）。
     // 由 CI/构建脚本注入到 PeerIdentityConfig；未注入时为空，发送功能保持禁用。

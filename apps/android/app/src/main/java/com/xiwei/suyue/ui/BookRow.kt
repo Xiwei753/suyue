@@ -6,6 +6,7 @@ import android.graphics.Color
 import com.xiwei.suyue.databinding.ItemBookBinding
 import com.xiwei.suyue.model.BookMeta
 import com.xiwei.suyue.model.BookStatus
+import com.xiwei.suyue.model.SendPolicy
 
 object BookRow {
 
@@ -20,11 +21,13 @@ object BookRow {
         binding.bookMeta.text =
             "${book.kind.value.uppercase()} · ${book.bytes} 字节 · ${book.chapters.size} 章"
         binding.bookStatus.text = book.status.value
-        val ready = book.status == BookStatus.READY
+        val ok = book.status == BookStatus.READY || book.status == BookStatus.SENT
         binding.bookStatus.setTextColor(
-            if (ready) Color.parseColor("#4ADE80") else Color.parseColor("#F87171")
+            if (ok) Color.parseColor("#4ADE80") else Color.parseColor("#F87171")
         )
-        binding.btnSend.isEnabled = canSend && ready
+        // P1-5：READY / SENT / TRANSFER_FAILED 均可发送（后者即重发）。
+        binding.btnSend.text = SendPolicy.sendLabel(book.status)
+        binding.btnSend.isEnabled = canSend && SendPolicy.isSendable(book.status)
         binding.btnSend.setOnClickListener { onSend() }
         binding.btnDelete.setOnClickListener { onDelete() }
     }

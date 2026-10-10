@@ -4,15 +4,20 @@
 package com.xiwei.suyue.storage
 
 import android.content.Context
+import android.util.AtomicFile
 import com.xiwei.suyue.model.BookMeta
 import com.xiwei.suyue.model.BookStatus
 import org.json.JSONArray
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 
 class BookRepository(context: Context) {
 
     private val filesDir: File = context.filesDir
     private val libraryFile: File = File(filesDir, LIBRARY_FILE)
+    // P1-7：AtomicFile 提供“写 .new + 原子替换 + 失败回滚”，替代手写 tmp+rename。
+    private val libraryAtomicFile: AtomicFile = AtomicFile(libraryFile)
     val booksDir: File = File(filesDir, "books")
 
     private fun readIndex(): MutableList<BookMeta> {
@@ -38,11 +43,18 @@ class BookRepository(context: Context) {
     private fun writeIndex(books: List<BookMeta>) {
         val arr = JSONArray()
         books.forEach { arr.put(it.toJson()) }
-        // 先写临时文件再原子替换，避免写入中途崩溃损坏索引。
-        val tmp = File(filesDir, "$LIBRARY_FILE.tmp")
-        tmp.writeText(arr.toString(), Charsets.UTF_8)
-        if (libraryFile.exists()) libraryFile.delete()
-        tmp.renameTo(libraryFile)
+        val bytes = arr.toString().toByteArray(Charsets.UTF_8)
+        // P1-7：原子替换；失败时回滚并抛出，绝不静默丢失索引。
+        var out: FileOutputStream? = null
+        try {
+            out = libraryAtomicFile.startWrite()
+            out.write(bytes)
+            out.flush()
+            libraryAtomicFile.finishWrite(out)
+        } catch (e: Exception) {
+            if (out != null) libraryAtomicFile.failWrite(out)
+            throw IOException("写入书库索引失败", e)
+        }
     }
 
     // 只列出正文文件真实存在的书。

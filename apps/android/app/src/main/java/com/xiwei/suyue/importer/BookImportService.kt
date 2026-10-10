@@ -89,14 +89,19 @@ object BookImportService {
     }
 
     private fun writeNormalizedFile(path: String, bytes: ByteArray) {
+        // P1-7：先写临时文件，再原子替换目标，避免“先删后写”中途失败丢正文。
         val tmp = File("$path.tmp")
-        tmp.writeBytes(bytes)
         val target = File(path)
-        if (target.exists()) target.delete()
-        if (!tmp.renameTo(target)) {
-            // rename 失败时退化为直接写。
-            target.writeBytes(bytes)
+        tmp.writeBytes(bytes)
+        try {
+            java.nio.file.Files.move(
+                tmp.toPath(),
+                target.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING
+            )
+        } catch (e: Exception) {
             tmp.delete()
+            throw java.io.IOException("写入正文文件失败：$path", e)
         }
     }
 

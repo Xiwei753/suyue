@@ -132,27 +132,54 @@ if [ -z "$PKG" ]; then
   echo "FAIL: 无法从 APK 读取包名（aapt2 dump badging）：$APK" >&2
   exit 1
 fi
-EXPECT_PKG="com.xiwei.suyue"
+EXPECT_PKG="com.xiwei.suyue.android"
 if [ "$PKG" != "$EXPECT_PKG" ]; then
   echo "FAIL: APK applicationId=$PKG，期望 $EXPECT_PKG：$APK" >&2
   exit 1
 fi
 
-# 签名信息：本脚本只报指纹，不把 debug 指纹当正式指纹。
-VERIFY="$("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null || true)"
+# 签名校验（P0-F）：apksigner 退出码必须为 0，且必须存在证书；
+# 旧实现用 `|| true` 吞掉退出码，未签名/校验失败也照打 APK_OK。
+VERIFY_STATUS=0
+VERIFY="$("$APKSIGNER" verify --print-certs "$APK" 2>&1)" || VERIFY_STATUS=$?
+if [ "$VERIFY_STATUS" -ne 0 ]; then
+  echo "FAIL: apksigner verify 返回非 0（status=$VERIFY_STATUS）：$APK" >&2
+  printf '%s\n' "$VERIFY" >&2
+  exit 1
+fi
 if printf '%s' "$VERIFY" | grep -qi 'does not verify\|DOES NOT VERIFY'; then
-  echo "FAIL: apksigner verify 未通过：$APK" >&2
+  echo "FAIL: apksigner verify 报告签名校验未通过：$APK" >&2
   exit 1
 fi
 CERT_SHA256="$(printf '%s\n' "$VERIFY" \
   | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1)"
 CERT_DN="$(printf '%s\n' "$VERIFY" \
   | sed -n 's/^Signer #1 certificate DN: //p' | head -n 1)"
-SIGNED_STATE="unsigned"
-[ -n "$CERT_SHA256" ] && SIGNED_STATE="yes"
+if [ -z "$CERT_SHA256" ]; then
+  echo "FAIL: APK 未签名（apksigner 未读到 Signer #1 证书）。" >&2
+  echo "      release 必须配置正式 keystore（SUYUE_ANDROID_KEYSTORE_* 环境变量）；" >&2
+  echo "      debug 应被 Android 自动签名，未签名说明构建配置异常。" >&2
+  exit 1
+fi
+SIGNED_STATE="yes"
+
+# release 若仍由 Android Debug 证书签名，视为“未正式签名”，直接失败，
+# 避免把 debug 指纹的包当成可对接 Wear Engine 的正式包（P0-F）。
+if [ "$MODE" = "release" ] && printf '%s' "$CERT_DN" | grep -qi 'Android Debug'; then
+  echo "FAIL: release 包由 Android Debug 证书签名，不是正式签名。" >&2
+  echo "      请设置 SUYUE_ANDROID_KEYSTORE_PATH/_PASSWORD/_KEY_ALIAS/_KEY_PASSWORD。" >&2
+  exit 1
+fi
+
+# debug 包可用于 UI/导入自测，但不能作为 Wear Engine 授权凭据。
+if [ "$MODE" = "debug" ]; then
+  WEAR_AUTH="no(debug:UI/import-only-not-wear-engine-authorized)"
+else
+  WEAR_AUTH="pending-agc-fingerprint-registration"
+fi
 
 SHA="$(sha256sum "$APK" | awk '{print $1}')"
-echo "APK_OK path=$REPO_ROOT/apps/android/$APK size=$SIZE package=$PKG mode=$MODE signed=$SIGNED_STATE cert_dn='$CERT_DN' cert_sha256=$CERT_SHA256 sha256=$SHA note=apk-container-and-cert-check-not-device-install"
+echo "APK_OK path=$REPO_ROOT/apps/android/$APK size=$SIZE package=$PKG mode=$MODE signed=$SIGNED_STATE cert_dn='$CERT_DN' cert_sha256=$CERT_SHA256 sha256=$SHA wear_engine_authorized=$WEAR_AUTH note=apk-container-and-cert-check-not-device-install"
 
 cat >&2 <<'MSG'
 
