@@ -4,10 +4,11 @@
 
 > 当前状态：**手表 Lite 工程已按新包名 `con.xiwei.suyue.gt4` 真实编译并签名成功**（`entry-default-release-signed.hap`，215,323 字节，`signed=yes`，`verify-app` 报 `Digest verify result: true` / `Verify success`；包内嵌的是手表自己的调试 profile，授权设备含 GT 4 的 UDID）。**但从未在 GT 4 上安装验证**；手机端 HAP 与双端真机互通也未验证。
 
-## 两个不同的运行环境
+## 三个不同的运行环境
 
 - **手表（`apps/watch`）**：HarmonyOS Lite Wearable 的 JS FA（HML/CSS/JS）。不能直接运行 Rust writer_core、ArkTS Stage HAP 或 Wear OS APK。
 - **手机（`apps/phone`）**：HarmonyOS NEXT / ArkTS Stage（优先 Pocket 2）。手机适合做 TXT/EPUB 转换与书籍管理。
+- **安卓手机（`apps/android`）**：在 nova 7 Pro 等 Android/HMS 手机上运行的原生 Kotlin APK，角色与 `apps/phone` 相同（同为「手机」），复用同一套 `shared/protocol` v0，用官方 Android Wear Engine SDK 传书给 GT 4。见 [apps/android/README.md](apps/android/README.md)。
 - **`shared/protocol`**：双端约定的协议文档，非直接共享可执行的二进制核心。
 
 ## 已写入的源码
@@ -41,7 +42,8 @@
 
 ```text
 apps/watch/       Lite Wearable 手表应用
-apps/phone/       ArkTS Stage 手机应用
+apps/phone/       ArkTS Stage 手机应用（HarmonyOS NEXT）
+apps/android/     原生 Kotlin 安卓 APK（nova 7 Pro，同「手机」角色）
 shared/protocol/  双端通信协议草案
 docs/             架构、参考项目、构建说明
 third_party/      MIT 原作者声明和许可证
@@ -67,6 +69,15 @@ tests/            与系统 SDK 无关的静态检查/分页测试
 - 两个包名由 `tests/source-contract.test.mjs` 断言「互相一致且不相同」。
 - 应用内部文件路径（`internal://app/gt4reader/...`）保持不变：改它会让
   已装设备上的阅读进度全部失联，收益为零。
+
+## 安卓传书 App（`apps/android`）
+
+议题 #3 面向 nova 7 Pro（Android/HMS）的「手机」端：一部手机同时装 Huawei Health、应用调测助手（DevEco Assistant）与素阅 APK，选择 TXT/EPUB → 经 Wear Engine 传给 GT 4 → 以 GT 4 回 `RESULT ok=true` 为入库成功。它是独立 Gradle 工程、独立 APK 签名，**不使用** HAP 的 `.p7b` profile。
+
+- 取/装 APK：`tools/build_android_apk.sh debug`（本机 Gradle + Android SDK，产物 `apps/android/app/build/outputs/apk/debug/app-debug.apk`）；或从 CI `android-apk` workflow 下载。安装：`adb install -r app-debug.apk`。
+- 诚实边界：**APK 构建成功 ≠ 可安装成功 ≠ 能与 GT 4 配对传书**。debug 包用本机调试证书签名，其指纹不是手表端 `supportLists` / Wear Engine 认可的正式手机指纹；真机配对需要 AGC 注册的 keystore 与注入的手表指纹（见 [apps/android/README.md](apps/android/README.md)）。
+- 诊断日志：`adb logcat -s Suyue`（导入/发送关键路径），界面「发送到 GT 4」卡片也会显示最近一次失败原因与错误码。
+- 详细状态、身份/签名约束与真机验收步骤见 [docs/ANDROID_APK.md](docs/ANDROID_APK.md)。
 
 ## 授权
 

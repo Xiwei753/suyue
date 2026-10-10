@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">素阅</string>
+    <string name="subtitle">手机书库 · 配套 GT 4 46mm</string>
+
+    <string name="section_import">导入书籍</string>
+    <string name="picked_none">尚未选择书籍</string>
+    <string name="pick_hint">可选择 TXT 或 EPUB 文件</string>
+    <string name="choose_book">选择 TXT / EPUB</string>
+
+    <string name="section_library">书架</string>
+    <string name="empty_hint">书库为空。导入 TXT 或 EPUB 后会列在这里，重启不丢。</string>
+
+    <string name="section_send">发送到 GT 4</string>
+    <string name="device_none">未发现已连接的 GT 4</string>
+    <string name="refresh_devices">刷新设备</string>
+    <string name="cancel_send">取消发送</string>
+    <string name="transfer_idle">未开始传输</string>
+
+    <string name="send">发送</string>
+    <string name="delete">删除</string>
+</resources>

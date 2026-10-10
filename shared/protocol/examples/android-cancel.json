@@ -1,0 +1,8 @@
+{
+  "v": 0,
+  "type": "ERROR",
+  "transferId": "a0b1c2d3e4f5061728394a5b6c7d8e9f",
+  "bookId": "57289cc5703b030b",
+  "code": "E_CANCELLED",
+  "message": "Android 侧取消：手表应停止接收并删除暂存"
+}

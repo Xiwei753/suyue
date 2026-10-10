@@ -1,0 +1,16 @@
+{
+  "v": 0,
+  "type": "BOOK_META",
+  "transferId": "a0b1c2d3e4f5061728394a5b6c7d8e9f",
+  "bookId": "57289cc5703b030b",
+  "title": "示例：Android 导入的中文书名",
+  "encoding": "utf-8",
+  "bytes": 38,
+  "sha256": "57289cc5703b030b17f321ca9b54e6d4c5538344bcba5cf00fc51ca6c3300d68",
+  "chunks": 1,
+  "chunkBytes": 65536,
+  "chapters": [
+    { "title": "第一章", "offset": 0, "length": 19 },
+    { "title": "第二章", "offset": 19, "length": 19 }
+  ]
+}
