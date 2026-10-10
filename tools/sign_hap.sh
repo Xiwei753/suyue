@@ -80,7 +80,7 @@ print((c.get("bundle-info") or {}).get("bundle-name", ""))
 import json, sys, zipfile
 hap, source = sys.argv[1:]
 with zipfile.ZipFile(hap) as z:
-    names = [item.filename for item in z.infolist() if not item.is_dir()]
+    names = [item.filename for item in z.infolist()]
     lite_bin = (len(names) == 1 and names[0].endswith(".bin")
                 and "/" not in names[0] and "\\" not in names[0])
     if lite_bin:
@@ -184,7 +184,7 @@ if [ "$HAP_KIND" = "lite-bin" ]; then
 import hashlib, sys, zipfile
 def extract(hap):
     with zipfile.ZipFile(hap) as z:
-        files = [x for x in z.infolist() if not x.is_dir()]
+        files = z.infolist()
         if len(files) != 1 or not files[0].filename.endswith(".bin"):
             raise ValueError("signed Lite HAP must contain exactly one .bin")
         if "/" in files[0].filename or "\\" in files[0].filename:
