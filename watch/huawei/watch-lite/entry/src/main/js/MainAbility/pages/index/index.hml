@@ -18,6 +18,6 @@
     <text class="empty" if="{{ books.length === 0 }}">书架为空：可让手机传书，或用 WATCH_BOOKS_DIR 内置 TXT</text>
     <text class="hint">{{ status }}</text>
     <text class="receiver-foot">{{ receiverStatus }}</text>
-    <text class="foot">{{ transferStatus }}</text>
+    <text class="foot" if="{{ transferStatus !== '' }}">{{ transferStatus }}</text>
   </div>
 </div>

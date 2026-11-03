@@ -29,7 +29,27 @@ HVIGORW="$(command -v hvigorw || echo ./hvigorw)"
 
 # 此信息只证明本次构建选择了哪个源码版本；最终可安装性
 # 仍必须以签名 HAP/内层 BIN 检查及 GT4 真机安装结果为准。
-WATCH_SOURCE_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+WATCH_SOURCE_COMMIT_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+WATCH_SOURCE_SHA="$(python3 - "$REPO_ROOT/watch/huawei/watch-lite" <<'PY'
+import hashlib
+from pathlib import Path
+import sys
+
+root = Path(sys.argv[1])
+ignored_dirs = {'.git', '.hvigor', 'node_modules', 'build'}
+digest = hashlib.sha256()
+for path in sorted(p for p in root.rglob('*') if p.is_file() and
+                   not any(part in ignored_dirs
+                           for part in p.relative_to(root).parts[:-1])):
+    relative = path.relative_to(root).as_posix().encode('utf-8')
+    content = path.read_bytes()
+    digest.update(len(relative).to_bytes(8, 'big'))
+    digest.update(relative)
+    digest.update(len(content).to_bytes(8, 'big'))
+    digest.update(content)
+print(digest.hexdigest())
+PY
+)"
 WATCH_SOURCE_VERSION="$(python3 - "$REPO_ROOT/watch/huawei/watch-lite/entry/src/main/config.json" <<'PY'
 import json, sys
 with open(sys.argv[1], encoding='utf-8') as f:
@@ -37,6 +57,7 @@ with open(sys.argv[1], encoding='utf-8') as f:
 print(str(v['code']) + '/' + str(v['name']))
 PY
 )"
+echo "WATCH_BUILD_COMMIT_SHA=$WATCH_SOURCE_COMMIT_SHA"
 echo "WATCH_BUILD_SOURCE_SHA=$WATCH_SOURCE_SHA"
 echo "WATCH_BUILD_SOURCE_VERSION=$WATCH_SOURCE_VERSION"
 

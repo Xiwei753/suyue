@@ -25,7 +25,7 @@ export default {
     title: '素阅',
     books: [],
     status: '书架就绪',
-    transferStatus: '传书未配置',
+    transferStatus: '',
     receiverStatus: '接收器：尚未启动',
     confirmId: '',
     // 从阅读页显式返回时传 resume=0，避免又自动打开同一本书。

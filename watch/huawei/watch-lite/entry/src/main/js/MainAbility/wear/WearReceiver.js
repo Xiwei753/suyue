@@ -22,7 +22,7 @@ let pageNavigationTarget = '';
 let appCreateSeen = false;
 let receiver = null;
 var receiveStatusHandler = null;
-var latestReceiveStatus = '传书未配置';
+var latestReceiveStatus = '';
 var receiverStatusHandler = null;
 var latestReceiverStatus = '接收器：尚未启动';
 // 手表 → 手机的唯一回执通道（wearengine.sendMsg）。
