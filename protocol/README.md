@@ -1,171 +1,104 @@
 # 双端传书协议 v0
 
-**状态：字段规格已定稿为源码级约定，尚未在 GT 4 / 手机真机上跑通。**
-手机（ArkTS Stage）与手表（Lite JS）各自实现同一序列化规则；
-`tests/protocol.test.mjs` 在 Node 中独立验证字段、幂等、乱序、
-断线恢复与摘要异常。
+**状态：字段约定已落实到源码，GT 4 / 手机真机传输仍待验证。**
+手机（ArkTS Stage）与手表（Lite JS）使用同一套 JSON 控制消息；
+`tests/protocol.test.mjs` 校验当前支持的消息示例。
 
 ## 基本原则
 
-- 手机负责解析 TXT/EPUB，统一输出 UTF-8；手表负责落盘与阅读。
-- 每本书有稳定 `bookId`（内容 SHA-256 前 16 字符）；每次传输有唯一
-  `transferId`（手机生成，UUID 或随机十六进制）。
-- 大文本按 **UTF-8 字节**切分；块边界可以落在多字节字符中间，
-  接收方按字节拼接后再整体解码，绝不在字符中间拆成两个字符串。
-- 控制消息用 JSON 文本；`CHUNK` 的数据走**文件通道**（优先，
-  见“通道选型”）或消息通道（base64）。
-- 接收方对同 `transferId + index` 的重复 `CHUNK` 幂等确认
-  （重复 ACK 同一 `index`，不重复落盘）。
-- 收到文件后，手表校验字节数和整本 `sha256`，通过后才把临时文件转为正式书籍。
-- 当前文件通道的手机侧成功表示 Wear Engine `transferFile` 回调成功；这只证明文件已发送，不证明手表已校验或入库。
+- 手机解析 TXT/EPUB 并统一输出 UTF-8；手表负责校验、落盘和阅读。
+- 每本书有稳定 `bookId`（内容 SHA-256 前 16 个小写十六进制字符）；
+  每次传输有唯一 `transferId`。
+- 正文通过 Wear Engine `transferFile` 作为一个完整文件发送。
+  当前实现不支持消息分块正文或断点续传消息。
+- 控制消息使用 JSON。长章节目录可以用多条 `CHAPTERS` 消息传递，
+  但不得截断章节目录或把正文拆成消息块。
+- 手表按固定窗口校验文件大小和整本 SHA-256；验证成功后才把暂存文件转正。
+- 手机侧 `transferFile` 成功只表示文件发送回调成功，不表示手表已校验或入库。
 
-## 通道选型（先测量，再定默认）
-
-优先测量 Wear Engine **文件通道**能否发送整个暂存文件；
-只有受限时才启用**应用层分块**。因此：
-
-- `HELLO.capabilities.fileChannel` 声明是否支持文件通道。
-- `chunkBytes` 由双方在 `HELLO` 协商；**协议不预设 4KB**。
-  文件读取 API 的默认 4096 字节与 Wear Engine 发送上限不是一回事。
-- 未协商或协商失败时，发送方必须停止并报 `E_PROTOCOL`，
-  不得擅自假定块大小。
-- 但 **P2P 单条 JSON 控制消息有 4096 字节上限**。BOOK_META 携带
-  100~500 章目录时会超限，此时必须改用下面的
-  `chapterChunks` + `CHAPTERS` 分片；正文仍走文件通道，不能截断章节。
-
-### SDK 映射（以华为 Wear Engine 示例为准，待真机验证）
+## SDK 映射（以华为 Wear Engine 示例为准，待真机验证）
 
 手机侧（ArkTS Stage，`@kit.WearEngine`）：
 
-- 控制消息（HELLO/BOOK_META/ERROR 等 JSON）：
+- 控制消息（HELLO/BOOK_META/CHAPTERS/ERROR 等 JSON）：
   `p2pClient.sendMessage(device.randomId, appParam,
-  P2pMessage{content: Uint8Array})`
+  P2pMessage{content: Uint8Array})`。
 - 整本正文：`p2pClient.transferFile(device.randomId,
   appParam, P2pFile{file: fs.openSync(path)},
-  (error, result) => …)`，回调 `result.progress`
-  上报进度；`COMMUNICATION_SUCCESS` 表示文件已发送，手表侧
-  校验与入库结果未知，手机不得显示“手表已确认入库”。
+  (error, result) => …)`；`COMMUNICATION_SUCCESS` 仅表示文件已发送。
 - 消息接收：`p2pClient.registerMessageReceiver(
-  device.randomId, appParam, callback)`，当前供阅读进度同步和旧式
-  消息通道 ACK 使用；文件通道不等待 `RESULT`。
-- 取消：`p2pClient.cancelFileTransfer(
-  device.randomId, appParam, P2pFile)` 返回
-  `Promise<P2pResult>`（比较
-  `P2pResultCode.COMMUNICATION_SUCCESS`）；
-  取消后向手表发送 `ERROR code=E_CANCELLED`，
-  半成品由手表清理。
-- `appParam = { remoteApp: { bundleName, fingerprint } }`，
-  手机 fingerprint 必须与手表 `supportLists`
-  配置一致。
+  device.randomId, appParam, callback)`，供控制消息和阅读进度同步。
+- 取消：`p2pClient.cancelFileTransfer(device.randomId, appParam, P2pFile)`；
+  取消后发送 `ERROR code=E_CANCELLED`，手表清理在途状态。
+- `appParam = { remoteApp: { bundleName, fingerprint } }`，手机 fingerprint
+  必须与手表 `supportLists` 配置一致。
 
 手表侧（Lite JS，`@system.wearengine`）：
 
-- 消息订阅：`wearengine.subscribeMsg`，
-  `data.message` 为 JSON 控制消息；
-- 文件到达：`data.isFileType` 分支携带文件路径，
-  候选字段 `file`/`name`/`uri`/`filePath`（上游示例用
-  `data.file`，**以真机回调实测为准**）；收到后
-  复制入沙箱、按片校验整本 SHA-256 再入库；
-- 可选的反向消息发送：`wearengine.sendMsg({deviceId, bundleName:
-  <手机包名>, abilityName: '', message})`。手表按 Lite Wear Engine
-  示例使用 `deviceId: 'remote'`；如果 `subscribeMsg` 回调提供
-  `deviceId`（候选字段 `deviceId`/`deviceID`/`srcDeviceId`/
-  `srcDeviceID`），实现优先使用回调值。文件通道不依赖这条反向消息，
-  手机只以 `transferFile` 成功回调报告文件已发送。
+- 消息订阅：`wearengine.subscribeMsg`，`data.message` 为 JSON 控制消息。
+- 文件到达：`data.isFileType` 分支携带文件路径。候选字段为
+  `file`/`name`/`uri`/`filePath`（上游示例使用 `data.file`，需真机核对）；
+  收到后复制入沙箱并校验大小和 SHA-256。
+- 取消和阅读进度消息共用反向消息通道。手机仅以自己的
+  `transferFile` 回调报告发送状态。
 - Manifest 授权：`config.json` 的
-  `metaData.customizeData[supportLists]` 必须为
-  `<手机包名>:<手机 APP ID>`（HarmonyOS 5.0+ 手机原生应用用
-  `bundle-info.app-identifier`，不是证书 SHA-256）；构建期由
-  `tools/inject_signing.py` 从真实手机 profile 注入，
-  未注入时收不到消息。手机→手表的 `remoteApp` 则使用 GT4 Lite
-  公钥身份 `<手表包名>_<Base64(原始 EC 公钥点)>`，两者方向不同。
+  `metaData.customizeData[supportLists]` 必须是
+  `<手机包名>:<手机 APP ID>`；HarmonyOS 原生手机使用
+  `bundle-info.app-identifier`，不是证书 SHA-256。
+  构建时由 `tools/inject_signing.py` 注入真实 APP ID。
+  手机发往手表的 `remoteApp` 则使用 GT4 Lite 公钥身份，方向不同。
 
 ## 消息 envelope
 
-所有消息均为 JSON 对象，必含 `v`（协议版本，当前 `0`）与 `type`。
-除 `HELLO` 外均含 `transferId`。字符串字段一律 UTF-8；
-JSON 序列化负责书名等字段的转义，接收方不得对转义结果做二次解码。
+传书控制消息必含 `v`（当前为 `0`）与 `type`；除 `HELLO` 外含
+`transferId`。阅读进度消息独立于传书状态机，不携带 `transferId`。
+字符串使用 UTF-8；书名等字段只由 JSON 序列化转义一次。
 
 ### HELLO（双向）
 
-`capabilities`：`formats`（如 `["utf8-text"]`）、`ack`（bool）、
-`chunkBytes`（number 或 null）、`fileChannel`（bool）。
+`capabilities` 包含 `formats`、`ack`、`chunkBytes` 和 `fileChannel`。
+正文传输要求双方报告文件通道能力；`chunkBytes` 是现有元数据字段，
+不用于拆分传输正文。
 
 ### BOOK_META（手机 → 表）
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| bookId | string | 是 | 内容 SHA-256 前 16 字符 |
-| title | string | 是 | 书名，JSON 转义由序列化保证 |
-| encoding | string | 是 | 当前仅 `"utf-8"` |
-| bytes | number | 是 | 规范化后 UTF-8 总字节数 |
-| sha256 | string | 是 | 规范化后正文的 SHA-256（hex 小写，64 字符） |
-| chunks | number | 是 | 块总数（≥1） |
-| chunkBytes | number | 是 | 本传输使用的块字节大小 |
-| chapters | array | 否 | `[{title, offset, length}]`，字节区间，按序。分片模式下为空数组；缺失或无效目录不影响正文传输 |
-| chapterChunks | number | 否 | 长目录分片数；缺省/0 表示内嵌目录完整；正数表示目录以 `CHAPTERS` 分片补充 |
+| bookId | string | 是 | 内容 SHA-256 前 16 个小写十六进制字符 |
+| transferId | string | 是 | 本次传输的唯一标识 |
+| title | string | 是 | 书名 |
+| encoding | string | 是 | 当前仅 `utf-8` |
+| bytes | number | 是 | 规范化正文的 UTF-8 字节数 |
+| sha256 | string | 是 | 规范化正文的 SHA-256，小写 hex |
+| chunks | number | 是 | 兼容元数据，不表示消息正文块 |
+| chunkBytes | number | 是 | 兼容元数据，正文仍作为完整文件发送 |
+| chapters | array | 否 | 按顺序的 `[{title, offset, length}]`，范围以字节计 |
+| chapterChunks | number | 否 | 正数表示目录将由 `CHAPTERS` 分片补充 |
 
 ### CHAPTERS（手机 → 表，可选）
 
-`BOOK_META.chapterChunks > 0` 时，手机在 BOOK_META 之后、正文文件之前
-按 `index` 逐片发送章节目录。手机等待每条 Wear Engine `sendMessage`
-调用完成以保持消息顺序，但不等待手表应用层 ACK；之后继续发送正文文件。
-每片的完整 JSON（UTF-8）必须 ≤4096 字节；发送方按实际序列化字节数
-分片，不得按固定章节数猜测。目录片发送失败或手表收到的目录不完整时，
-手表丢弃整份目录，正文仍可通过大小和 SHA-256 校验后入库。
+`BOOK_META.chapterChunks > 0` 时，手机在正文文件前按 `index` 发送目录片。
+每条完整 JSON（UTF-8）不超过 4096 字节；手机等待 SDK 发送调用完成以保持
+顺序，但不等待手表应用层 ACK。目录必须全部到齐且范围顺序有效才保存；
+目录缺失或无效时，正文仍可独立校验并入库，目录留空。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| bookId / transferId | string | 是 | 必须与 BOOK_META 一致 |
+| bookId / transferId | string | 是 | 必须与 `BOOK_META` 一致 |
 | index | number | 是 | 0-based 分片序号 |
-| total | number | 是 | 分片总数，须等于 BOOK_META.chapterChunks |
-| chapters | array | 是 | 本片 `[{title, offset, length}]`，非空 |
+| total | number | 是 | 分片总数，等于 `BOOK_META.chapterChunks` |
+| chapters | array | 是 | 本片非空的 `[{title, offset, length}]` |
 
-接收方按 index 收集（重复片幂等），全部到齐且范围顺序有效后才会把
-完整目录交给书架；目录不完整时正文仍可入库，但书架目录留空。
+### 正文文件（手机 → 表）
 
-### CHUNK（手机 → 表）
+发送 `BOOK_META` 和可选目录后，手机通过 `transferFile` 发送完整正文。手表
+复制到临时路径后校验总字节数与整本 SHA-256，成功才提交书架；失败会清理
+暂存文件。当前没有消息分块或断线续传的正文路径。
 
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| bookId / transferId | string | 是 | - |
-| index | number | 是 | 0-based 块序号 |
-| total | number | 是 | 块总数，须等于 BOOK_META.chunks |
-| offset | number | 是 | 该块在整本文件中的 UTF-8 字节偏移 |
-| length | number | 是 | 该块字节数（末块可以更小） |
-| payloadB64 | string | 消息通道必填 | base64 编码的原始字节 |
+### RESULT（表 → 手机，可选）
 
-文件通道：`CHUNK` 控制消息不含 `payloadB64`，数据字节由文件通道
-按 `offset` 写入同名 `transferId` 的暂存文件。
-
-### ACK（表 → 手机）
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| bookId / transferId / index | string/number | 是 | 收到的块序号 |
-| ok | boolean | 是 | 该块落盘成功 |
-
-### FINISH（手机 → 表）
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| bookId / transferId / chunks | - | 是 | 发送完毕，请求整体校验 |
-
-### RESULT（表 → 手机）
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| bookId / transferId / ok | - | 是 | 整本校验并落盘后才可为 true |
-| reason | string | ok=false 必填 | 见错误码 |
-
-### RESUME（双向）
-
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| bookId / transferId / received | - | 是 | 接收方已确认落盘的 `index` 数组 |
-
-断线后发送方发 `RESUME`，只重传缺失块；同一 `transferId` 的
-已完成块不重发。
+只用于拒绝 `BOOK_META`（例如 `E_BUSY` 或元数据错误）。成功/失败的文件接收
+结果在手表本地显示；手机不等待传书 `RESULT`，也不把文件发送成功误报为入库成功。
 
 ### ERROR（双向）
 
@@ -181,54 +114,43 @@ JSON 序列化负责书名等字段的转义，接收方不得对转义结果做
 
 | code | 含义 |
 | --- | --- |
-| E_UNSUPPORTED_FORMAT | 格式不在 `formats` 内 |
+| E_UNSUPPORTED_FORMAT | 格式不支持 |
 | E_DECODE | 解码/清洗失败（如 EPUB 有 DRM） |
 | E_SPACE | 手表空间不足 |
-| E_TIMEOUT | 块超时未达 |
-| E_DIGEST_MISMATCH | 整本或块摘要不符 |
-| E_MISSING_CHUNKS | FINISH 时仍有缺块 |
-| E_DUPLICATE_TRANSFER | 同一 transferId 重复开始且状态不一致 |
+| E_TIMEOUT | 在途元数据超时并清理 |
+| E_DIGEST_MISMATCH | 整本 SHA-256 不符 |
+| E_DUPLICATE_TRANSFER | 同一传输标识状态冲突 |
 | E_CANCELLED | 发送方取消 |
-| E_PEER_UNAVAILABLE | 对端未配对/离线/不支持 |
-| E_BUSY | 已有另一本在途：单本互斥（第二轮 P0-2） |
-| E_PROTOCOL | 协议字段缺失或协商失败 |
-| E_CHAPTER_TOO_LARGE | 单个章节标题使分片仍超过 4096 字节：手机侧本地终止发送，不截断章节 |
+| E_PEER_UNAVAILABLE | 对端未配对、离线或不支持 |
+| E_BUSY | 已有另一本在途，单本互斥 |
+| E_PROTOCOL | 协议字段缺失或文件无对应元数据 |
+| E_CHAPTER_TOO_LARGE | 目录分片仍超过 4096 字节，手机本地停止发送 |
 
-## 单本在途（第二轮 P0-2）
+## 单本在途
 
 手表同一时刻只允许一个 `transferId` 处于接收中：
 
-- 第二个**不同** `transferId` 的 `BOOK_META`：回
-  `RESULT ok=false reason=E_BUSY`，不改变当前状态；
-- 相同 `transferId` 的重复 `BOOK_META`：视为重启，
-  整份替换接收状态（幂等重发）；
-- 文件通道到达的文件唯一对应当前在途 `transferId`；
-  无在途传输时收到文件：丢弃并回 `E_PROTOCOL`，
-  不落盘。
+- 第二个不同 `BOOK_META` 返回 `RESULT ok=false reason=E_BUSY`，不改变当前状态。
+- 相同 `transferId` 的 `BOOK_META` 视为重启，整份替换接收状态。
+- 文件只能关联到当前待接收的 `BOOK_META`；没有在途元数据时不落盘。
 
 ## 时序
 
-```
-手机 → 表  HELLO（capabilities，含 chunkBytes/fileChannel）
+```text
+手机 → 表  HELLO（capabilities，含 fileChannel）
 表 → 手机 HELLO（capabilities 回应）
 手机 → 表  BOOK_META
-手机 → 表  CHAPTERS[index]（可选；每片 ≤4096 字节，不等待应用 ACK）
+手机 → 表  CHAPTERS[index]（可选；每片 ≤4096 字节）
 手机 → 表  transferFile(整本正文)
-表       校验文件大小 + sha256 → 完整目录（若可用）+ 正文入库
+表       校验文件大小 + SHA-256 → 正文入库（完整目录有效时一并保存）
 手机     transferFile 回调成功后显示“文件已发送；手表侧校验/入库未确认”
 ```
 
-旧式 `CHUNK` / `FINISH` 消息通道仍使用 `ACK` / `RESULT`；这不是当前
-文件通道发送方的完成条件。
-
 ## 接收方约束
 
-- 校验失败的半本书**不得**出现在书架；清理暂存文件。
-- 空间不足：`E_SPACE`，清理暂存，可恢复。
-- 完成后写入书籍元信息及默认阅读进度；再次发送同一书籍
-  （同 `bookId`）时不覆盖已有阅读进度。
-- 块序号越界、`offset` 不连续、`length` 与 `payloadB64` 解码长度
-  不符：`E_PROTOCOL`。
+- 校验失败的半本书不得出现在书架；清理暂存文件。
+- 完成后写入书籍元信息及默认阅读进度；重复发送同一 `bookId` 不覆盖原进度。
+- 文件通道完成不依赖也不发送应用层成功回执。
 
 ## 阅读进度同步（独立于传书）
 

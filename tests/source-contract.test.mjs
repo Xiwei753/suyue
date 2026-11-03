@@ -99,14 +99,14 @@ assert.ok(buildDoc.includes('issue #12') &&
 assert.ok(buildDoc.includes('暂不可关闭'),
   'build docs must not claim real-device transfer is complete');
 const protocolReadme = read('protocol/README.md');
-for (const t of ['BOOK_META', 'CHUNK', 'ACK', 'FINISH', 'RESULT',
-  'RESUME', 'ERROR', 'E_MISSING_CHUNKS', 'E_DIGEST_MISMATCH',
+for (const t of ['BOOK_META', 'CHAPTERS', 'ERROR', 'E_BUSY',
+  'E_DIGEST_MISMATCH',
   'READ_PROGRESS_GET', 'READ_PROGRESS_STATE', 'READ_PROGRESS_APPLY']) {
   assert.ok(protocolReadme.includes(t),
     'protocol spec must define ' + t);
 }
-for (const ex of ['hello', 'book-meta', 'chapters', 'chunk', 'ack', 'result',
-  'resume', 'error', 'read-progress-get', 'read-progress-state',
+for (const ex of ['hello', 'book-meta', 'android-book-meta', 'chapters',
+  'android-cancel', 'error', 'read-progress-get', 'read-progress-state',
   'read-progress-apply']) {
   assert.ok(existsSync('protocol/examples/' + ex + '.json'),
     'protocol example missing: ' + ex);
@@ -554,7 +554,7 @@ assert.ok(read('harmony/entry/src/main/ets/services/BookTransferService.ts')
     .includes('ChapterChunks.split'),
   'both phone senders must chunk long chapter catalogs');
 assert.ok(read('protocol/README.md').includes('chapterChunks') &&
-  read('protocol/README.md').includes('目录不完整时正文仍可入库') &&
+  read('protocol/README.md').includes('目录缺失或无效时，正文仍可独立校验并入库') &&
   !read('protocol/README.md').includes('CHAPTERS_ACK'),
   'protocol must document optional 4096-byte chapter chunking');
 
@@ -589,6 +589,12 @@ assert.ok(watchReceiver.includes('export function reportLocalReceiveOutcome(') &
   'file completion must update the local shelf without sending an app RESULT');
 assert.ok(watchReceiver.includes('Wear message received type='),
   'watch must log whether HELLO/BOOK_META actually reached the receiver');
+const watchApp = read(
+  'watch/huawei/watch-lite/entry/src/main/js/MainAbility/app.js');
+assert.ok(watchIndex.includes('IncomingBookReceiver') &&
+  watchIndex.includes('wear.configureReceiverServices()') &&
+  watchApp.includes('configureReceiverServices'),
+  'shelf must install transfer and progress handlers before subscription starts');
 const wearDeviceService = read(
   'harmony/entry/src/main/ets/services/WearDeviceService.ts');
 assert.ok(wearDeviceService.includes('receiver registered: bundle='),

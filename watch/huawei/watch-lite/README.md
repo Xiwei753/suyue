@@ -7,9 +7,9 @@
 - `storage/BookStorage.js`：应用私有目录多书管理（books/、temp/、progress/），`readBytes` 按字节窗口流式读取，`commitVerifiedBook` 把校验通过的暂存书转正。
 - `storage/LibraryIndex.js`：`books.json` 多书索引；只列文件真实存在的书；重复发送同一书籍不覆盖阅读进度。
 - `storage/ProgressStore.js`：用 Lite 原生 `@system.storage` 每书单键记录字节偏移和少量上页历史；字号、主题另由 `ReaderPreferences` 保存。没有进度 JSON 文件回退。
-- `wear/TransferLogic.js` + `wear/IncomingBookReceiver.js`：按 `protocol` v0 接收 BOOK_META/CHUNK/FINISH，整本 SHA-256 校验通过才入书架；缺块 `E_MISSING_CHUNKS`、摘要不符 `E_DIGEST_MISMATCH`、取消 `E_CANCELLED` 均有处理；失败清理暂存。
+- `wear/TransferLogic.js` + `wear/IncomingBookReceiver.js`：按 `protocol` v0 接收 BOOK_META/CHAPTERS，正文只接收 Wear Engine 文件通道，流式校验大小与整本 SHA-256 后才入书架；取消 `E_CANCELLED` 会清理在途状态。
 - `util/Sha256.js`：纯 JS SHA-256（Lite JS 无加密 API，ES5 兼容），Node 互验通过。
-- `util/Utf8.js`、`util/Base64.js`：纯 JS UTF-8 解码与 base64 解码（运行时无 atob），Node 互验通过。
+- `util/Utf8.js`、`util/Base64.js`：纯 JS UTF-8 与 base64 辅助模块（运行时无 atob），Node 互验通过。
 - `reader/PageLayout.js`：唯一分页器（编码边界/换行/上下页偏移）。
 - `reader/ReaderSettings.js`：字号/行距/主题的单一真相；列数/行数由
   其推导，改变设置按当前字节位置重排，不丢字、不重复、不跳页。
@@ -125,9 +125,9 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
   手机书仍需二次点击确认删除。
 - 已移除：#9 的手动「文件自检」入口、`pages/probe/*`、`WatchFileProbe.js`、
   `BundledBookImporter.js`，以及启动前置链 `prepareLibrary/readIndex/migrateDemo/...` 与重复看门狗。
-- Wear Engine 的唯一订阅由 `MainAbility/app.js` 在应用创建时启动、应用销毁时注销，
-  不随书架页切到阅读页而停止；书架只挂接/解绑自己的状态回调，冷启动自动续读进入阅读页时仍可接收。
-  初始化状态保存在 `wear/WearReceiver.js`，书架显示当前状态，阅读页不创建第二个订阅。
+- Wear Engine 的唯一订阅由 `MainAbility/app.js` 管理并在应用销毁时注销，
+  书架页先注册传书/进度处理器，再由 app bridge 启动订阅；页面切换不停止订阅。
+  初始化状态保存在 `wear/WearReceiver.js`，阅读页只使用同一 app bridge，不创建第二个订阅。
 
 `storage/BookStorage.js` 仍保留 settle-once + `setOperationTimeout`（默认 8s）无回调兜底。
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 传输协议纯逻辑（无 HarmonyOS 依赖，Node 可测）：
-// BOOK_META 校验、块接收（幂等、按序）、拼接、摘要核验。
-import { sha256Bytes, createSha256 } from '../util/Sha256.js';
+// BOOK_META / 章节目录校验，以及文件通道正文摘要核验。
+import { createSha256 } from '../util/Sha256.js';
 import { isLowerHex } from '../util/Validate.js';
 
 export function validateBookMeta(meta) {
@@ -103,9 +103,6 @@ export function beginTransfer(meta, activeTransferId) {
     ok: true,
     state: {
       meta: normalizedMeta,
-      chunks: {},        // index → Uint8Array
-      receivedCount: 0,
-      totalBytes: 0,
       // 长章节目录：BOOK_META 只给分片数，CHAPTERS 逐片补齐。
       chapterChunks: {}, // index → [{title,offset,length}]
       chapterChunksReceived: 0,
@@ -197,69 +194,6 @@ export function missingChapterIndices(state) {
     if (!state.chapterChunks[i]) missing.push(i);
   }
   return missing;
-}
-
-// 幂等：重复 index 不覆盖、不重复计数。
-// 按序约束：offset 必须等于已收字节数（消息通道按序到达；
-// 文件通道不经此函数）。
-export function applyChunk(state, chunk, payloadBytes) {
-  if (chunk.transferId !== state.meta.transferId) {
-    return { ok: false, reason: 'E_PROTOCOL' };
-  }
-  if (chunk.bookId !== state.meta.bookId) {
-    return { ok: false, reason: 'E_PROTOCOL' };
-  }
-  if (chunk.total !== state.meta.chunks) {
-    return { ok: false, reason: 'E_PROTOCOL' };
-  }
-  if (chunk.index < 0 || chunk.index >= state.meta.chunks) {
-    return { ok: false, reason: 'E_PROTOCOL' };
-  }
-  // 幂等优先：重复 index 直接确认，不再校验 offset
-  // 连续性（重复块的 offset 必然小于已收字节数）。
-  if (state.chunks[chunk.index]) {
-    return { ok: true, duplicate: true };
-  }
-  if (chunk.offset !== state.totalBytes) {
-    return { ok: false, reason: 'E_PROTOCOL' };
-  }
-  if (chunk.length !== payloadBytes.length) {
-    return { ok: false, reason: 'E_PROTOCOL' };
-  }
-  state.chunks[chunk.index] = payloadBytes;
-  state.receivedCount += 1;
-  state.totalBytes += payloadBytes.length;
-  return { ok: true };
-}
-
-export function missingIndices(state) {
-  const missing = [];
-  for (var i = 0; i < state.meta.chunks; i++) {
-    if (!state.chunks[i]) missing.push(i);
-  }
-  return missing;
-}
-
-export function assembleBytes(state) {
-  const missing = missingIndices(state);
-  if (missing.length > 0) {
-    return { ok: false, reason: 'E_MISSING_CHUNKS' };
-  }
-  if (state.totalBytes !== state.meta.bytes) {
-    return { ok: false, reason: 'E_PROTOCOL' };
-  }
-  const out = new Uint8Array(state.totalBytes);
-  var pos = 0;
-  for (var i = 0; i < state.meta.chunks; i++) {
-    const part = state.chunks[i];
-    out.set(part, pos);
-    pos += part.length;
-  }
-  return { ok: true, bytes: out };
-}
-
-export function verifyDigest(bytes, expectedSha256) {
-  return sha256Bytes(bytes) === expectedSha256;
 }
 
 // 文件通道流式校验：按窗口喂入，峰值内存

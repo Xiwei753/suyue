@@ -15,6 +15,12 @@ import { ensureDirs, bookPath,
 import { listBooks, removeBook } from '../../storage/LibraryIndex';
 import { loadLastBook, clearProgress } from '../../storage/ProgressStore';
 import { isLowerHex } from '../../util/Validate';
+import { IncomingBookReceiver } from '../../wear/IncomingBookReceiver';
+import { handleMessage as handleProgressMessage,
+  setApplyHandler, clearApplyHandler, takePendingApply,
+  setActiveBook, clearActiveBook } from '../../wear/ProgressSync';
+
+var bookReceiver = null;
 
 function wearBridge() {
   return getApp().data.wearBridge;
@@ -41,6 +47,21 @@ export default {
     this.externalLoaded = false;
     this.lastBookId = '';
     const wear = wearBridge();
+    if (!bookReceiver) {
+      bookReceiver = new IncomingBookReceiver(
+        (message) => wear.reportReceiveStatus(message),
+        (message) => wear.sendMessage(message));
+    }
+    wear.setBookReceiver(bookReceiver);
+    wear.setProgressSync({
+      handleMessage: handleProgressMessage,
+      setApplyHandler: setApplyHandler,
+      clearApplyHandler: clearApplyHandler,
+      takePendingApply: takePendingApply,
+      setActiveBook: setActiveBook,
+      clearActiveBook: clearActiveBook
+    });
+    wear.configureReceiverServices();
     this.transferStatus = wear.getReceiveStatus();
     this.receiverStatus = wear.getReceiverStatus();
     wear.setReceiveStatusHandler((message) => {

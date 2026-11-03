@@ -4,10 +4,12 @@ import { beginReceive, stopReceive,
   setReceiveStatusHandler, getReceiverStatus,
   setReceiverStatusHandler, onReceiverPageShow,
   onReceiverPageHide, markPageNavigation,
-  clearPageNavigation } from './wear/WearReceiver';
-import { setApplyHandler, clearApplyHandler,
+  clearPageNavigation, configureReceiverServices,
+  setBookReceiver, setProgressSync,
+  setApplyHandler, clearApplyHandler,
   takePendingApply, setActiveBook,
-  clearActiveBook } from './wear/ProgressSync';
+  clearActiveBook, sendMessage,
+  reportReceiveStatus } from './wear/WearReceiver';
 
 export default {
   // Page bundles use the Lite JS FA app object to reach the single receiver.
@@ -23,11 +25,16 @@ export default {
       onReceiverPageHide,
       markPageNavigation,
       clearPageNavigation,
+      configureReceiverServices,
+      setBookReceiver,
+      setProgressSync,
       setApplyHandler,
       clearApplyHandler,
       takePendingApply,
       setActiveBook,
-      clearActiveBook
+      clearActiveBook,
+      sendMessage,
+      reportReceiveStatus
     }
   },
   onCreate() {

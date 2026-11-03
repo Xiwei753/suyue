@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Wear Engine 适配层：版本检查、手机 APP ID 门控、
-// 消息订阅；协议消息与文件通道路由到
-// IncomingBookReceiver；旧式消息通道回执经
-// wearengine.sendMsg 发回手机。
+// 消息订阅；传书与进度处理器由首个页面注入，避免 app 入口重复打包
+// 页面存储依赖。
 // Based on Wear Engine receiver call patterns from
 // Explore in HMOS Wearable (MIT).
 // Does not vendor the upstream Huawei SDK wrapper (Apache-2.0).
 import wearengine from '@system.wearengine';
 import { PHONE_BUNDLE_NAME, PHONE_APP_ID } from './PeerConfig';
-import { IncomingBookReceiver } from './IncomingBookReceiver';
-import { handleMessage as handleProgressMessage } from './ProgressSync';
 
 let subscribed = false;
 let receiveStarting = false;
@@ -21,6 +18,9 @@ let pageNavigationPending = false;
 let pageNavigationTarget = '';
 let appCreateSeen = false;
 let receiver = null;
+let progressSync = null;
+let receiverServicesReady = false;
+let pendingBeginTrigger = '';
 var receiveStatusHandler = null;
 var latestReceiveStatus = '';
 var receiverStatusHandler = null;
@@ -146,7 +146,6 @@ function resetAndBeginReceive(trigger, status) {
   receiveAttemptId++;
   receiveStarting = false;
   subscribed = false;
-  receiver = null;
   sendToPhoneImpl = null;
   peerDeviceId = '';
   loggedRemoteDeviceDefault = false;
@@ -173,6 +172,64 @@ export function reportLocalReceiveOutcome(outcome) {
   notifyReceiveStatus(JSON.stringify(event));
 }
 
+export function reportReceiveStatus(message) {
+  notifyReceiveStatus(message);
+}
+
+export function setBookReceiver(instance) {
+  receiver = instance || null;
+}
+
+export function setProgressSync(handlers) {
+  progressSync = handlers || null;
+}
+
+export function configureReceiverServices() {
+  receiverServicesReady = !!receiver && !!progressSync;
+  if (!receiverServicesReady) {
+    notifyReceiverStatus('接收器初始化失败：页面服务不可用');
+    return;
+  }
+  if (pendingBeginTrigger && !subscribed && !receiveStarting) {
+    const trigger = pendingBeginTrigger;
+    pendingBeginTrigger = '';
+    beginReceive(trigger);
+  }
+}
+
+export function sendMessage(text) {
+  if (typeof sendToPhoneImpl === 'function') sendToPhoneImpl(text);
+}
+
+export function setApplyHandler(handler) {
+  if (progressSync && progressSync.setApplyHandler) {
+    progressSync.setApplyHandler(handler);
+  }
+}
+
+export function clearApplyHandler(handler) {
+  if (progressSync && progressSync.clearApplyHandler) {
+    progressSync.clearApplyHandler(handler);
+  }
+}
+
+export function takePendingApply(bookId) {
+  return progressSync && progressSync.takePendingApply ?
+    progressSync.takePendingApply(bookId) : null;
+}
+
+export function setActiveBook(bookId) {
+  if (progressSync && progressSync.setActiveBook) {
+    progressSync.setActiveBook(bookId);
+  }
+}
+
+export function clearActiveBook() {
+  if (progressSync && progressSync.clearActiveBook) {
+    progressSync.clearActiveBook();
+  }
+}
+
 // 回调里可能携带 deviceId 的候选字段名（与文件引用一样逐一探测，
 // 不合成、不猜测具体值）。真机抓到后应把命中的字段名固化下来。
 var DEVICE_ID_FIELDS = ['deviceId', 'deviceID', 'srcDeviceId', 'srcDeviceID'];
@@ -190,9 +247,13 @@ export function capturePeerDevice(data) {
 }
 
 export function beginReceive(trigger) {
-  const notify = notifyReceiveStatus;
   if (!PHONE_APP_ID) {
     notifyReceiverStatus('接收器未配置：缺少手机 APP ID');
+    return;
+  }
+  if (!receiverServicesReady) {
+    pendingBeginTrigger = trigger || '应用启动';
+    notifyReceiverStatus('接收器等待页面服务就绪');
     return;
   }
   if (subscribed || receiveStarting) return;
@@ -262,8 +323,6 @@ export function beginReceive(trigger) {
                   PHONE_BUNDLE_NAME + ' appIdPrefix=' +
                   PHONE_APP_ID.substring(0, 4) + '…');
                 notifyReceiverStatus('阶段：手机 APP ID 已设置；注册消息接收');
-                receiver = new IncomingBookReceiver(
-                  notify, sendToPhone);
                 subscribeAttempted = true;
                 wearengine.subscribeMsg({
                   success: (data) => {
@@ -350,10 +409,10 @@ function routeMessage(messageText) {
   console.info('Wear message received type=' + type);
   // 阅读进度是独立小消息，不进入传书状态机；仍复用同一次
   // subscribeMsg 和同一个 sendToPhone 通道。
-  if (handleProgressMessage(messageText, sendToPhoneImpl)) return;
+  if (progressSync && typeof progressSync.handleMessage === 'function' &&
+      progressSync.handleMessage(messageText, sendToPhoneImpl)) return;
   if (!receiver) return;
-  // 旧式消息通道 ACK/RESUME/RESULT 由接收器内部
-  // 经统一响应通道（sendToPhone）回发；文件通道不等 RESULT。
+  // CHUNK/FINISH/RESUME 正文消息不受支持；正文只走文件通道。
   receiver.onMessage(messageText);
 }
 
@@ -409,6 +468,10 @@ export function stopReceive() {
   pageWasHidden = false;
   pageNavigationPending = false;
   pageNavigationTarget = '';
+  receiverServicesReady = false;
+  pendingBeginTrigger = '';
+  progressSync = null;
+  receiver = null;
   if (!shouldUnsubscribe) return;
   try {
     wearengine.unsubscribeMsg();

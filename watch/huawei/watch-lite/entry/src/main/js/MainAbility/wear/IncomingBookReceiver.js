@@ -1,21 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // 手表侧书籍接收入口：按 protocol v0 处理
-// BOOK_META / CHAPTERS / CHUNK / FINISH / RESUME / ERROR，
-// 以及 Wear Engine 文件通道（receiveFileChannel）。
+// BOOK_META / CHAPTERS / ERROR 与 Wear Engine 文件通道
+// （receiveFileChannel）。正文只走文件通道。
 // 纯逻辑在 ./TransferLogic.js（Node 可测）；本文件
 // 只做 Lite JS I/O 包装。
 //
-// 消息通道 ACK/RESULT/ERROR 与阅读进度消息经
-// sendToPhone（Wear Engine sendMsg）回手机；文件通道
-// 不依赖应用层回执。
-import { decodeUtf8Bytes } from '../util/Utf8.js';
-import { decodeBase64 } from '../util/Base64.js';
-import { ensureDirs, saveTempBook,
+// ERROR 与阅读进度消息经 Wear Engine sendMsg 发出；
+// 传书文件通道不依赖应用层回执。
+import { ensureDirs,
   commitVerifiedBook, copyFile, deleteFile,
   fileSize, readWindow, tempPath } from '../storage/BookStorage.js';
 import { addBook } from '../storage/LibraryIndex.js';
-import { beginTransfer, applyChunk, applyChapterChunk,
-  assembleChapters, missingChapterIndices, assembleBytes, verifyDigest,
+import { beginTransfer, applyChapterChunk,
+  assembleChapters, missingChapterIndices,
   createDigestVerifier } from './TransferLogic.js';
 
 // 文件通道流式校验窗口（字节）。
@@ -36,8 +33,8 @@ export function IncomingBookReceiver(onStatus, sendToPhone, options) {
   const notify = (message) => {
     if (typeof onStatus === 'function') onStatus(message);
   };
-  // 消息通道协议结果和进度消息共用响应通道；文件通道
-  // 的完成由手机侧 Wear Engine transferFile 回调报告。
+  // 元信息错误仅更新本地状态；文件接收结果在本地由
+  // receiveFileChannel 回调发布，不发传书应用层回执。
   const respond = (text) => {
     notify(text);
     if (typeof sendToPhone === 'function') {
@@ -108,8 +105,7 @@ export function IncomingBookReceiver(onStatus, sendToPhone, options) {
     }
   }
 
-  // 消息通道入口。旧式 CHUNK/FINISH 的 ACK/RESULT 与
-  // 阅读进度消息仍经统一响应通道；文件通道不等待应用层回执。
+  // 控制消息入口。正文仅通过 receiveFileChannel 到达。
   this.onMessage = function (messageText) {
     let message;
     try {
@@ -170,76 +166,6 @@ export function IncomingBookReceiver(onStatus, sendToPhone, options) {
           ' received=' + state.chapterChunksReceived);
         break;
       }
-      case 'CHUNK': {
-        const state = transfers[message.transferId];
-        if (!state) {
-          return result(message.transferId, message.bookId,
-            false, 'E_PROTOCOL');
-        }
-        const payload = decodeBase64(message.payloadB64 || '');
-        const applied = applyChunk(state, message, payload);
-        if (!applied.ok) {
-          cleanup(message.transferId);
-          return result(message.transferId, message.bookId,
-            false, applied.reason);
-        }
-        // ACK 经统一响应通道回发（唯一通道）。
-        respond(JSON.stringify({
-          v: 0, type: 'ACK', transferId: message.transferId,
-          bookId: message.bookId, index: message.index,
-          ok: true
-        }));
-        break;
-      }
-      case 'FINISH': {
-        const state = transfers[message.transferId];
-        if (!state) {
-          return result(message.transferId, message.bookId,
-            false, 'E_PROTOCOL');
-        }
-        const assembledChapters = assembleChapters(state);
-        const chapters = assembledChapters.ok ?
-          assembledChapters.chapters : [];
-        if (!assembledChapters.ok) {
-          console.warn('message channel book has no complete chapter catalog: ' +
-            assembledChapters.reason);
-        }
-        const assembled = assembleBytes(state);
-        if (!assembled.ok) {
-          cleanup(message.transferId);
-          return result(message.transferId, state.meta.bookId,
-            false, assembled.reason);
-        }
-        if (!verifyDigest(assembled.bytes, state.meta.sha256)) {
-          cleanup(message.transferId);
-          return result(message.transferId, state.meta.bookId,
-            false, 'E_DIGEST_MISMATCH');
-        }
-        const text = decodeUtf8Bytes(assembled.bytes);
-        persistTransfer(state, text, chapters, (saved) => {
-          cleanup(message.transferId);
-          return result(message.transferId, state.meta.bookId,
-            saved.ok, saved.reason);
-        });
-        break;
-      }
-      case 'RESUME': {
-        const state = transfers[message.transferId];
-        if (!state) {
-          notify('未知传输：' + message.transferId);
-          break;
-        }
-        // 消息通道按序到达：RESUME 回报当前已收字节数，
-        // 发送方从该偏移继续。
-        // RESUME 经统一响应通道回发（唯一通道）。
-        respond(JSON.stringify({
-          v: 0, type: 'RESUME',
-          transferId: message.transferId,
-          bookId: state.meta.bookId,
-          received: [state.receivedCount]
-        }));
-        break;
-      }
       case 'ERROR': {
         if (message.code === 'E_CANCELLED' &&
             message.transferId) {
@@ -254,39 +180,6 @@ export function IncomingBookReceiver(onStatus, sendToPhone, options) {
         notify('未知协议消息：' + message.type);
     }
   };
-
-  function persistTransfer(state, text, chapters, cb) {
-    ensureDirs((dirs) => {
-      if (!dirs.ok) {
-        return cb({ ok: false, reason: 'E_SPACE' });
-      }
-      saveTempBook(state.meta.transferId, text, (saved) => {
-        if (!saved.ok) {
-          return cb({ ok: false, reason: 'E_SPACE' });
-        }
-        commitVerifiedBook(state.meta.transferId,
-          state.meta.bookId, (committed) => {
-            if (!committed.ok) {
-              return cb({ ok: false,
-                reason: 'E_SPACE' });
-            }
-            addBook({
-              bookId: state.meta.bookId,
-              title: state.meta.title,
-              encoding: state.meta.encoding,
-              bytes: state.meta.bytes,
-              sha256: state.meta.sha256,
-              chunks: state.meta.chunks,
-              chunkBytes: state.meta.chunkBytes,
-              chapters: chapters
-            }, (added) => {
-              cb(added.ok ? { ok: true } :
-                { ok: false, reason: 'E_SPACE' });
-            });
-          });
-      });
-    });
-  }
 
   // 文件通道（P0-5）：Wear Engine 把手机发来的
   // 文件送达 srcUri（回调给出路径）。这里把它

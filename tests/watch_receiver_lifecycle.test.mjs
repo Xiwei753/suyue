@@ -71,9 +71,15 @@ try {
     harnesses.push(h);
     const app = (await h.load('app.js')).default;
     const receiver = await h.load('wear/WearReceiver.js');
+    const pageMod = await h.load('pages/index/index.js');
     const { control } = await import(h.wearengineStubPath);
 
     app.onCreate();
+    const page = Object.create(pageMod.default);
+    page.data = Object.assign({}, pageMod.default.data);
+    page.external = [];
+    page.resume = '0';
+    page.onInit();
     assert.equal(calls(control, 'getWearEngineVersion'), 1);
     assert.equal(receiver.getReceiverStatus(), '读取版本失败 code=206');
 
@@ -94,9 +100,15 @@ try {
     harnesses.push(h);
     const app = (await h.load('app.js')).default;
     const receiver = await h.load('wear/WearReceiver.js');
+    const pageMod = await h.load('pages/index/index.js');
     const { control } = await import(h.wearengineStubPath);
 
     app.onCreate();
+    const page = Object.create(pageMod.default);
+    page.data = Object.assign({}, pageMod.default.data);
+    page.external = [];
+    page.resume = '0';
+    page.onInit();
     assert.equal(calls(control, 'getWearEngineVersion'), 1);
     assert.equal(calls(control, 'subscribeMsg'), 1);
     receiver.onReceiverPageShow('pages/index/index');

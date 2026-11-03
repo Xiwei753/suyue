@@ -478,8 +478,12 @@ fi
 # 正文应在 rawfile 资源里，页面 JS 只带书单元数据。
 PAGE_JS_DIR="$REPO_ROOT/watch/huawei/watch-lite/entry/build/default/intermediates/lite_source/default/assets/js/MainAbility"
 if [ -d "$PAGE_JS_DIR" ]; then
-  for page in index/index reader/reader; do
-    js="$PAGE_JS_DIR/pages/$page.js"
+  for page in app index/index reader/reader; do
+    if [ "$page" = "app" ]; then
+      js="$PAGE_JS_DIR/app.js"
+    else
+      js="$PAGE_JS_DIR/pages/$page.js"
+    fi
     if [ -f "$js" ]; then
       echo "WATCH_PAGE_JS page=$page size=$(stat -c%s "$js" 2>/dev/null || stat -f%z "$js")"
     fi

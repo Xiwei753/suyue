@@ -186,10 +186,10 @@ assert.ok(index.includes('getProgressStore().remove(book.bookId)'),
 
 const watchReceiver = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/wear/WearReceiver.js');
-assert.ok(watchReceiver.includes('handleProgressMessage') &&
-  watchReceiver.indexOf('handleProgressMessage') <
+assert.ok(watchReceiver.includes('progressSync.handleMessage') &&
+  watchReceiver.indexOf('progressSync.handleMessage') <
     watchReceiver.indexOf('receiver.onMessage(messageText)'),
-  'watch must route progress before transfer receiver');
+  'watch bridge must route progress before transfer receiver');
 assert.equal((watchReceiver.match(/wearengine\.subscribeMsg\(/g) || []).length, 1,
   'watch must keep exactly one subscribeMsg');
 
@@ -220,6 +220,8 @@ const watchApp = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/app.js');
 assert.ok(watchReader.includes('getApp().data.wearBridge') &&
   watchIndex.includes('getApp().data.wearBridge') &&
+  watchIndex.includes('handleMessage as handleProgressMessage') &&
+  watchIndex.includes('wear.setProgressSync') &&
   watchApp.includes('wearBridge:') &&
   watchApp.includes('setApplyHandler') &&
   watchApp.includes('clearApplyHandler') &&
@@ -228,8 +230,11 @@ assert.ok(watchReader.includes('getApp().data.wearBridge') &&
   watchReader.includes('applyRemoteProgress'),
   'watch app bridge must retain active-reader progress application');
 assert.ok(!watchReader.includes("from '../../wear/") &&
-  !watchIndex.includes("from '../../wear/"),
-  'watch page bundles must access the app bridge without importing receiver modules');
+  watchIndex.includes("from '../../wear/IncomingBookReceiver") &&
+  watchIndex.includes("from '../../wear/ProgressSync") &&
+  !watchApp.includes("from './wear/IncomingBookReceiver") &&
+  !watchApp.includes("from './wear/ProgressSync"),
+  'shelf page must register receiver services while the app bundle stays small');
 assert.ok(watchIndex.includes('clearProgress'),
   'watch delete must clear progress keys');
 

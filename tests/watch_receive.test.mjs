@@ -4,8 +4,6 @@
 //   - 文件通道：BOOK_META → receiveFileChannel
 //     （复制 → 大小校验 → 流式 SHA-256 → 原子入库）
 //     → local status refreshes the visible shelf only on success;
-//   - 消息通道：BOOK_META → CHUNK×N → FINISH
-//     → 拼接 → 摘要 → 入库 → RESULT（legacy message channel）；
 //   - 失败路径：摘要不符 / 大小不符 / 无 BOOK_META，
 //     必须清理暂存、不得出现在书架；
 //   - LibraryIndex：写操作串行化、原子写无残留。
@@ -198,76 +196,12 @@ const orphanOutcome = await wait((cb) =>
   receiver.receiveFileChannel(receivedUri, null, cb));
 assert.equal(orphanOutcome.ok, false);
 assert.equal(orphanOutcome.reason, 'E_PROTOCOL');
-// ---- E. 消息通道闭环：CHUNK×N → FINISH ----
-const msgText = '消息通道：中文内容 😀。'.repeat(200);
-const msgBytes = enc.encode(msgText);
-const msgBookId = sha256(msgBytes).slice(0, 16);
-const chunkBytes = 500;
-const total = Math.ceil(msgBytes.length / chunkBytes);
-const msgMeta = {
-  v: 0, type: 'BOOK_META',
-  transferId: 'msg-ok-1',
-  bookId: msgBookId, title: '消息通道书',
-  encoding: 'utf-8', bytes: msgBytes.length,
-  sha256: sha256(msgBytes),
-  chunks: total, chunkBytes,
-  chapters: [{ title: '正文', offset: 0,
-    length: msgBytes.length }]
-};
-receiver.onMessage(JSON.stringify(msgMeta));
-const sentB64 = (bytes) =>
-  Buffer.from(bytes).toString('base64');
-let offset = 0;
-for (let i = 0; i < total; i++) {
-  const slice = msgBytes.subarray(offset,
-    offset + chunkBytes);
-  const ackCountBefore = sentMessages
-    .filter((t) => JSON.parse(t).type === 'ACK')
-    .length;
-  receiver.onMessage(JSON.stringify({
-    v: 0, type: 'CHUNK', transferId: 'msg-ok-1',
-    bookId: msgBookId, index: i, total,
-    offset, length: slice.length,
-    payloadB64: sentB64(slice)
-  }));
-  // ACK 必须经统一响应通道回手机。
-  const ackMessages = sentMessages
-    .map((t) => JSON.parse(t))
-    .filter((m) => m.type === 'ACK' &&
-      m.transferId === 'msg-ok-1');
-  assert.equal(ackMessages.length,
-    ackCountBefore + 1,
-    'each chunk must be ACKed on the response channel');
-  const ack = ackMessages[ackMessages.length - 1];
-  assert.equal(ack.ok, true);
-  assert.equal(ack.index, i);
-  offset += slice.length;
-}
+// ---- E. 旧式正文 CHUNK 消息不进入传书状态机 ----
 receiver.onMessage(JSON.stringify({
-  v: 0, type: 'FINISH', transferId: 'msg-ok-1',
-  bookId: msgBookId
+  v: 0, type: 'CHUNK', transferId: 'legacy-message-body'
 }));
-// FINISH 的 persist 是回调链，轮询等待入库。
-let msgDone = false;
-for (let tries = 0; tries < 200 && !msgDone; tries++) {
-  const list = await wait((cb) =>
-    LibraryIndex.listBooks(cb));
-  msgDone = list.some((e) => e.bookId === msgBookId);
-  if (!msgDone) {
-    await new Promise((r) => setTimeout(r, 10));
-  }
-}
-assert.ok(msgDone, 'message-channel book must be persisted');
-const msgResult = sentMessages
-  .map((t) => JSON.parse(t))
-  .filter((m) => m.type === 'RESULT' &&
-    m.transferId === 'msg-ok-1');
-assert.equal(msgResult.length, 1);
-assert.equal(msgResult[0].ok, true);
-const msgOnDisk = readSandbox('gt4reader/books/' +
-  msgBookId + '.txt');
-assert.deepEqual(Buffer.from(msgOnDisk),
-  Buffer.from(msgBytes));
+assert.equal(statuses[statuses.length - 1], '未知协议消息：CHUNK',
+  'book bodies use the file channel; legacy message chunks are unsupported');
 
 // ---- E2. 完整 65 章目录分片后，文件入库保留全部跳章元数据 ----
 const chapterParts = [];
@@ -368,10 +302,9 @@ assert.deepEqual(invalidCatalogEntry.chapters, []);
 let fakeNow = 0;
 let fakeTimerId = 0;
 const fakeTimers = new Map();
-const staleReplies = [];
 const staleStatuses = [];
 const staleReceiver = new IncomingBookReceiver((status) => staleStatuses.push(status),
-  (message) => staleReplies.push(JSON.parse(message)), {
+  () => {}, {
     staleTimeoutMs: 1000,
     now: () => fakeNow,
     setTimeout: (fn, delay) => {
@@ -407,7 +340,6 @@ assert.equal(expiryOutcome.ok, true,
 
 // ---- F. LibraryIndex 串行写（P1-12） ----
 await wait((cb) => LibraryIndex.removeBook(bookId, cb));
-await wait((cb) => LibraryIndex.removeBook(msgBookId, cb));
 for (const id of [chapterBookId, missingMeta.bookId, partialMeta.bookId,
   invalidCatalogMeta.bookId, expiryRetry.bookId]) {
   await wait((cb) => LibraryIndex.removeBook(id, cb));

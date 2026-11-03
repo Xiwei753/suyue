@@ -38,7 +38,7 @@ for (const f of files) {
     assert.ok(msg.transferId.length > 0, f + ': transferId must be non-empty');
   }
 }
-for (const required of ['android-book-meta.json', 'android-result.json']) {
+for (const required of ['android-book-meta.json', 'android-cancel.json']) {
   assert.ok(files.includes(required), required + ' must exist');
 }
 
