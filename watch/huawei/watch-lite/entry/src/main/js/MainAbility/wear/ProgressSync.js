@@ -3,18 +3,15 @@
 // 不创建第二套 Wear Engine 订阅；WearReceiver 已收到的消息在这里分流。
 // 消息只含 bookId/sha256/offset/updatedAt，不含正文、目录或书架。
 // 本文件运行在 JerryScript：禁止正则、replace/match/search/padStart/DataView。
-import { BUNDLED_BOOKS, readBundledWindow }
-  from '../storage/BundledBookSource.js';
-import { listBooks } from '../storage/LibraryIndex.js';
-import { readBytes } from '../storage/BookStorage.js';
-import { loadProgress, saveProgress, loadLastBook, saveLastBook,
-  loadSyncBase, saveSyncBase } from '../storage/ProgressStore.js';
-import { isLowerHex } from '../util/Validate.js';
-
 var MAX_MESSAGE_BYTES = 4096;
 var applyHandler = null;
 var pendingApply = null;
 var activeBookId = '';
+var syncServices = {};
+
+export function configureServices(services) {
+  syncServices = services || {};
+}
 
 function utf8Length(text) {
   var total = 0;
@@ -47,8 +44,9 @@ function isOffset(n) {
 
 function isValidSummary(value) {
   return value && typeof value === 'object' &&
-    isLowerHex(value.bookId, 16) &&
-    isLowerHex(value.sha256, 64) &&
+    typeof syncServices.isLowerHex === 'function' &&
+    syncServices.isLowerHex(value.bookId, 16) &&
+    syncServices.isLowerHex(value.sha256, 64) &&
     isOffset(value.offset) &&
     (value.updatedAt === undefined || isOffset(value.updatedAt));
 }
@@ -64,8 +62,9 @@ function mergeBooks(external) {
   var out = [];
   var seen = {};
   var i;
-  for (i = 0; i < BUNDLED_BOOKS.length; i++) {
-    var b = BUNDLED_BOOKS[i];
+  var bundled = syncServices.bundledBooks || [];
+  for (i = 0; i < bundled.length; i++) {
+    var b = bundled[i];
     if (!b || seen[b.bookId]) continue;
     seen[b.bookId] = true;
     out.push(b);
@@ -81,7 +80,7 @@ function mergeBooks(external) {
 
 function loadBooks(cb) {
   try {
-    listBooks(function (external) {
+    syncServices.listBooks(function (external) {
       cb(mergeBooks(external || []));
     });
   } catch (e) {
@@ -96,10 +95,10 @@ function loadSummaries(books, cb) {
   function next() {
     if (index >= books.length) return cb(out);
     var book = books[index++];
-    if (!book || !isLowerHex(book.sha256, 64)) return next();
-    loadProgress(book.bookId, function (progress) {
+    if (!book || !syncServices.isLowerHex(book.sha256, 64)) return next();
+    syncServices.loadProgress(book.bookId, function (progress) {
       if (!progress || !progress.ok || progress.empty) return next();
-      loadSyncBase(book.bookId, function (base) {
+      syncServices.loadSyncBase(book.bookId, function (base) {
         var offset = progress.offset;
         var updatedAt = 0;
         if (base && base.ok && base.offset === offset) {
@@ -148,7 +147,7 @@ function chunkSummaries(summaries, base) {
 }
 
 function sendState(sendToPhone, requestId) {
-  loadLastBook(function (last) {
+  syncServices.loadLastBook(function (last) {
     loadBooks(function (books) {
       loadSummaries(books, function (summaries) {
         var lastBook = last && last.ok ?
@@ -185,7 +184,7 @@ function validateBoundary(book, offset, cb) {
   if (offset === book.bytes) return cb(true);
   if (offset > book.bytes) return cb(false);
   var reader = book.origin === 'builtin' ?
-    readBundledWindow : readBytes;
+    syncServices.readBundledWindow : syncServices.readBytes;
   try {
     reader(book.bookId, offset, 1, function (data) {
       if (!data || !data.ok || !data.bytes ||
@@ -217,10 +216,10 @@ function applyOffset(book, remote, sendToPhone, cb) {
   }
   validateBoundary(book, remote.offset, function (ok) {
     if (!ok) return cb(false);
-    saveProgress(book.bookId, remote.offset, [], null,
+    syncServices.saveProgress(book.bookId, remote.offset, [], null,
       function (saved) {
         if (!saved || !saved.ok) return cb(false);
-        saveSyncBase(book.bookId, remote.offset,
+        syncServices.saveSyncBase(book.bookId, remote.offset,
           remote.updatedAt || 0, function () {
             notifyApply(book.bookId, remote.offset);
             cb(true);
@@ -253,11 +252,11 @@ function handleRemoteState(message, sendToPhone) {
       if (index >= message.books.length) {
         // 上次阅读只更新入口；活动阅读中绝不强制跳书。
         if (lastBook && !activeBookId &&
-            isLowerHex(lastBook.sha256, 64) &&
+            syncServices.isLowerHex(lastBook.sha256, 64) &&
             (typeof message.lastSha256 !== 'string' ||
              !message.lastSha256 ||
              lastBook.sha256 === message.lastSha256)) {
-          loadLastBook(function (localLast) {
+          syncServices.loadLastBook(function (localLast) {
             var localAt = localLast && localLast.ok ?
               (localLast.updatedAt || 0) : 0;
             var remoteAt = typeof message.lastUpdatedAt === 'number' ?
@@ -265,7 +264,7 @@ function handleRemoteState(message, sendToPhone) {
             // 只有对端明确更新时才改续读入口；不比较书名/offset，
             // 也不强制跳书。
             if (remoteAt > localAt) {
-              saveLastBook(lastBook.bookId, function () {});
+              syncServices.saveLastBook(lastBook.bookId, function () {});
             }
           });
         }
@@ -278,15 +277,15 @@ function handleRemoteState(message, sendToPhone) {
           remote.offset > book.bytes) {
         return next();
       }
-      loadProgress(book.bookId, function (local) {
-        loadSyncBase(book.bookId, function (base) {
+      syncServices.loadProgress(book.bookId, function (local) {
+        syncServices.loadSyncBase(book.bookId, function (base) {
           if (!local || !local.ok) return next();
           if (local.empty) {
             return applyOffset(book, remote, sendToPhone,
               function () { next(); });
           }
           if (local.offset === remote.offset) {
-            saveSyncBase(book.bookId, local.offset,
+            syncServices.saveSyncBase(book.bookId, local.offset,
               remote.updatedAt || 0, function () { next(); });
             return;
           }
@@ -331,10 +330,10 @@ function handleApply(message, sendToPhone) {
     // 范围和 UTF-8 边界校验，不再用本地旧进度反推冲突。
     // 以本地当前位置判断重复：同一偏移不重绘，但从更后面合法
     // 回退到同一旧偏移必须生效，不能按 offset 永久去重。
-    loadProgress(book.bookId, function (local) {
+    syncServices.loadProgress(book.bookId, function (local) {
       if (local && local.ok && !local.empty &&
           local.offset === message.offset) {
-        saveSyncBase(book.bookId, local.offset,
+        syncServices.saveSyncBase(book.bookId, local.offset,
           message.updatedAt || 0, function () {});
         return;
       }

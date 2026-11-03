@@ -64,6 +64,7 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
 
 - 工程结构已对齐 Lite Wearable 参考示例（`build-profile.json5` 含 `signingConfig`/`strictMode`、`hvigor/hvigor-config.json5`、`entry/hvigorfile.ts`、`resources/base/media/icon{,_small}.png`、`config.json` 的 `"$media:icon"`）。
 - 本地构建：`tools/build_watch_lite.sh debug|release`；需要 DevEco `hvigorw` 与 Lite Wearable SDK，缺失时明确报错，不用 Node 检查冒充构建。
+- 当前脚本会将 debug 的三个最终页面 bundle 用 SDK 自带 Terser 压缩、重建 `.bc`，并要求每页 JS 不超过 48 KiB；再用 Lite `haptobin_tool.jar` 把 JS、快照、rawfile 与身份清单重打成 GT4 单 BIN。release 产物也走同一单 BIN 打包与快照校验。
 - **本机已真实编译并签名成功**（release，新包名）：产物
   `entry-default-release-signed.hap`，215,323 字节。
   `build_artifact_check.sh` 报 `signed=yes`，`hap-sign-tool verify-app` 报
@@ -77,10 +78,8 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
   `app.bundleName`，不一致就拒绝签名。
   包内快照齐全：`app.bc` (806 B)、`pages/index/index.bc` (29,938 B)、
   `pages/reader/reader.bc` (21,802 B)。
-  > issue #17 复测（2026-10-27）：当前本机工具链的 **release** 构建再次出现
-  > `index.bc`/`reader.bc` 快照转换失败（在 #16 基线上同样可复现，非本次代码引入）；
-  > `tests/build_artifact_check.sh` 按设计硬失败。当前交付以 **debug 单 BIN 签名 HAP**
-  > 为准；release 快照仍需工具链侧修复后重验。
+  > issue #17 记录的是 2026-10-27 旧工具链输出；现行脚本会对实际 Lite 单 BIN
+  > 输入逐页确认 `.bc` 存在，并在缺页、超过体积门槛或 BIN 丢失快照时硬失败。
 - **包名**：手表 = **`con.xiwei.suyue.gt4`**（`con` 不是笔误：AGC 里
   实际注册的名字，已确认保留），手机 = `com.xiwei.suyue`。
   两者必须互不相同——双端靠包名区分自己与对端，撞名会让配对门控失效。
@@ -116,7 +115,8 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
 「正在准备本地书库」「导入内置书籍超时」「读取 books.json（第 4 步）」。issue #10 **换掉这条启动架构**：
 
 - **启动不等异步**：`pages/index/index.js` 的 `onInit()` 先用编译期书单
-  `books/BookCatalog.g.js`（**只有元数据，没有正文**）**同步**渲染书架并置 `status`，
+  `books/BookCatalog.g.js`（**只有元数据，没有正文**）配置 rawfile 读取器，
+  再**同步**渲染书架并置 `status`，
   随后才在后台 `loadExternal()`（`ensureDirs` → `listBooks`）合并手机传书的外部书。
 - 首次安装没有 `books.json`（真实 301）→ **立刻显示空书架**，不再有"第 4 步超时"。
 - 外部书加载失败、或文件接口完全不回调，**只**记 `console.error('[suyue] E_EXTERNAL_*')`，
@@ -126,8 +126,10 @@ Lite JS SDK 在 `$HOME/.harmony-cli/sdk/default/openharmony/js`。
 - 已移除：#9 的手动「文件自检」入口、`pages/probe/*`、`WatchFileProbe.js`、
   `BundledBookImporter.js`，以及启动前置链 `prepareLibrary/readIndex/migrateDemo/...` 与重复看门狗。
 - Wear Engine 的唯一订阅由 `MainAbility/app.js` 管理并在应用销毁时注销，
-  书架页先注册传书/进度处理器，再由 app bridge 启动订阅；页面切换不停止订阅。
-  初始化状态保存在 `wear/WearReceiver.js`，阅读页只使用同一 app bridge，不创建第二个订阅。
+  app bridge 提供文件、书架索引和进度存储 API；书架页注入这些 API，配置内置书
+  读取器，再注册传书和进度同步处理器。页面切换不停止订阅；
+  阅读页复用书架注入的
+  书籍/进度存储 API；分页、章节、设置、表冠与阅读偏好模块只随阅读页打包。
 
 `storage/BookStorage.js` 仍保留 settle-once + `setOperationTimeout`（默认 8s）无回调兜底。
 
@@ -164,8 +166,8 @@ WATCH_BOOKS_DIR=/绝对路径/我的书 tools/build_watch_lite.sh debug
 - 只认顶层 `*.txt`，稳定排序；UTF-8（含 BOM）/ UTF-16(BOM) / **确定性回退 GB18030**，都失败即非零退出；
   `bookId` = 规范化 UTF-8 的 SHA-256 前 16 位；同内容去重、同名加 ` (2)`；单本上限默认 8 MiB。**从不打印正文**。
 - 正文写入临时资源 `entry/src/main/resources/rawfile/gt4books/<bookId>.txt`（真实规范化字节，
-  hvigor 会真正打进内层 `entry.bin`）；`books/BookCatalog.g.js` = `export var BOOKS =
-  [{bookId,title,bytes,file,sha256,chapters}]` —— **仅元数据，不含正文**；另有 `books_report.json`
+  hvigor 会真正打进内层 `entry.bin`）；`books/BookCatalog.g.js` 只含紧凑书架字段，
+  `books/BookChapters.g.js` 单独含阅读页需要的章节标题和字节偏移；两者都不含正文。另有 `books_report.json`
   （含每本前 64 字节 base64 `probeB64`）供产物校验。
 - 仓库里的 `books/` 与 `rawfile/` 都是临时区：构建前备份、`trap ... EXIT` 还原/清理，
   `.gitignore` 屏蔽之，**私人正文不进公开仓库也不进日志**。
@@ -183,7 +185,7 @@ WATCH_BOOKS_DIR=/绝对路径/我的书 tools/build_watch_lite.sh debug
   仍不把整本书解码进 JS 内存。
 - 每个文件调用都有 settle-once 有限超时（`setBundledTimeout`，默认 6s），阅读页不会永久卡住。
 - **恢复阅读位置**：先通过 Lite `@system.storage` 读取该书的最新字节位置，再开始按该位置读取正文；**绝不先显示/写回第 0 页**。个人字号、主题设置独立异步加载，缺省的设置键**不再阻挡新书正文读取**；设置若晚到，则在当前位置重排而不重置进度。退出书架前仍等待最后一次保存。进度读取失败会明确报错。进度 KV 的 `setProgressTimeout` 默认 2.5s，正文文件接口单次上限 6s。
-- 书架只 import `BookCatalog.g.js`；**阅读页也不再 import 任何正文 JS**。进度仍是 UTF-8 字节 offset，持久化只用 `suyue.pos.<bookId>` 的单一 KV 项（长度小于 128 字节），不再读取或生成 `progress/<bookId>.json`。
+- 书架页同步读取紧凑 `BookCatalog.g.js` 并配置 rawfile 读取器；阅读页单独导入 `BookChapters.g.js`，通过注入接口按窗口读取正文，**不 import 正文 JS**。进度仍是 UTF-8 字节 offset，持久化只用 `suyue.pos.<bookId>` 的单一 KV 项（长度小于 128 字节），不再读取或生成 `progress/<bookId>.json`。
 
 构建实测（本机 Hvigor，单 BIN 签名，bundle `con.xiwei.suyue.gt4`）：
 

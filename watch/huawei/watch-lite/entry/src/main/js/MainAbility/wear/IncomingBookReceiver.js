@@ -2,24 +2,18 @@
 // 手表侧书籍接收入口：按 protocol v0 处理
 // BOOK_META / CHAPTERS / ERROR 与 Wear Engine 文件通道
 // （receiveFileChannel）。正文只走文件通道。
-// 纯逻辑在 ./TransferLogic.js（Node 可测）；本文件
-// 只做 Lite JS I/O 包装。
+// 纯逻辑通过 options.transferLogic 注入（Node 可测）；本文件
+// 只做 Lite JS I/O 包装，避免把协议状态机重复编进页面包。
 //
 // ERROR 与阅读进度消息经 Wear Engine sendMsg 发出；
 // 传书文件通道不依赖应用层回执。
-import { ensureDirs,
-  commitVerifiedBook, copyFile, deleteFile,
-  fileSize, readWindow, tempPath } from '../storage/BookStorage.js';
-import { addBook } from '../storage/LibraryIndex.js';
-import { beginTransfer, applyChapterChunk,
-  assembleChapters, missingChapterIndices,
-  createDigestVerifier } from './TransferLogic.js';
-
 // 文件通道流式校验窗口（字节）。
 var VERIFY_WINDOW = 64 * 1024;
 
 export function IncomingBookReceiver(onStatus, sendToPhone, options) {
   const config = options || {};
+  const storage = config.storage || {};
+  const transferLogic = config.transferLogic || storage.transferLogic || {};
   // Bound abandoned phone metadata so a later user send is not left busy.
   const staleTimeoutMs = typeof config.staleTimeoutMs === 'number' &&
     isFinite(config.staleTimeoutMs) && config.staleTimeoutMs > 0 ?
@@ -128,7 +122,7 @@ export function IncomingBookReceiver(onStatus, sendToPhone, options) {
         // META 返回 E_BUSY，不得按错误元信息
         // 校验/登记（P0-2）。相同 id 视为重启，
         // 状态整份替换。
-        const started = beginTransfer(message,
+        const started = transferLogic.beginTransfer(message,
           activeTransferId());
         if (!started.ok) {
           if (started.reason !== 'E_BUSY') {
@@ -152,7 +146,7 @@ export function IncomingBookReceiver(onStatus, sendToPhone, options) {
           console.warn('chapter chunk rejected reason=E_PROTOCOL');
           break;
         }
-        const applied = applyChapterChunk(state, message);
+        const applied = transferLogic.applyChapterChunk(state, message);
         if (!applied.ok) {
           state.chapterCatalogInvalid = true;
           state.chapterChunks = {};
@@ -197,20 +191,30 @@ export function IncomingBookReceiver(onStatus, sendToPhone, options) {
     if (state.fileReceiving) {
       return cb({ ok: false, reason: 'E_BUSY' });
     }
+    if (typeof storage.tempPath !== 'function' ||
+        typeof storage.ensureDirs !== 'function' ||
+        typeof storage.copyFile !== 'function' ||
+        typeof storage.deleteFile !== 'function' ||
+        typeof storage.commitVerifiedBook !== 'function' ||
+        typeof storage.addBook !== 'function' ||
+        typeof storage.fileSize !== 'function' ||
+        typeof storage.readWindow !== 'function') {
+      return cb({ ok: false, reason: 'E_STORAGE_UNAVAILABLE' });
+    }
     // Prevent a second file callback from being associated with the same
     // oldest pending BOOK_META while its first body is being verified.
     state.fileReceiving = true;
-    const dst = tempPath(meta.transferId);
+    const dst = storage.tempPath(meta.transferId);
     const finish = (ok, reason) => {
       cb(ok ? { ok: true } :
         { ok: false, reason: reason });
     };
-    ensureDirs((dirs) => {
+    storage.ensureDirs((dirs) => {
       if (!dirs.ok) {
         cleanup(meta.transferId);
         return finish(false, 'E_SPACE');
       }
-      copyFile(srcUri, dst, (copied) => {
+      storage.copyFile(srcUri, dst, (copied) => {
         if (!copied.ok) {
           cleanup(meta.transferId);
           return finish(false, copied.reason);
@@ -218,7 +222,7 @@ export function IncomingBookReceiver(onStatus, sendToPhone, options) {
         verifyFile(dst, meta, (verified) => {
           if (!verified.ok) {
             // 校验失败：删除暂存，不入书架。
-            deleteFile(dst, () => {});
+            storage.deleteFile(dst, () => {});
             cleanup(meta.transferId);
             return finish(false, verified.reason);
           }
@@ -226,23 +230,23 @@ export function IncomingBookReceiver(onStatus, sendToPhone, options) {
           // being checked. Snapshot only after size/SHA succeeds so a late
           // complete catalog remains available for chapter jumps. The body
           // never waits for a catalog or an app-level acknowledgment.
-          const assembledChapters = assembleChapters(state);
+          const assembledChapters = transferLogic.assembleChapters(state);
           const chapters = assembledChapters.ok ?
             assembledChapters.chapters : [];
           if (!assembledChapters.ok) {
-            const missing = missingChapterIndices(state);
+            const missing = transferLogic.missingChapterIndices(state);
             console.warn('file channel proceeding without complete chapter catalog ' +
               'received=' + state.chapterChunksReceived + '/' +
               state.expectedChapterChunks + ' missing=' + missing.join(','));
           }
-          commitVerifiedBook(meta.transferId,
+          storage.commitVerifiedBook(meta.transferId,
             meta.bookId, (committed) => {
               if (!committed.ok) {
-                deleteFile(dst, () => {});
+                storage.deleteFile(dst, () => {});
                 cleanup(meta.transferId);
                 return finish(false, 'E_SPACE');
               }
-              addBook({
+              storage.addBook({
                 bookId: meta.bookId,
                 title: meta.title,
                 encoding: meta.encoding,
@@ -277,7 +281,7 @@ export function IncomingBookReceiver(onStatus, sendToPhone, options) {
   // 大小 + 流式 SHA-256 校验：固定窗口读取，
   // 峰值内存只有一个窗口（P1-11）。
   function verifyFile(uri, meta, cb) {
-    fileSize(uri, (stat) => {
+    storage.fileSize(uri, (stat) => {
       if (!stat.ok) {
         return cb({ ok: false, reason: stat.reason });
       }
@@ -285,7 +289,7 @@ export function IncomingBookReceiver(onStatus, sendToPhone, options) {
         return cb({ ok: false,
           reason: 'E_SIZE_MISMATCH' });
       }
-      const verifier = createDigestVerifier(meta.sha256);
+      const verifier = transferLogic.createDigestVerifier(meta.sha256);
       readNext(uri, 0, verifier, meta, cb);
     });
   }
@@ -296,7 +300,7 @@ export function IncomingBookReceiver(onStatus, sendToPhone, options) {
     }
     const size = Math.min(VERIFY_WINDOW,
       meta.bytes - offset);
-    readWindow(uri, offset, size, (r) => {
+    storage.readWindow(uri, offset, size, (r) => {
       if (!r.ok) {
         return cb({ ok: false, reason: r.reason });
       }

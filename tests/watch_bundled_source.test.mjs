@@ -80,6 +80,8 @@ try {
   const load = createWatchLoader({ tmpDir: tmp, stubPath,
     wearengineStubPath: we, routerStubPath: router });
   const bs = await load('storage/BundledBookSource.js');
+  const catalog = await load('books/BookCatalog.g.js');
+  bs.configureBooks(catalog.BOOKS);
 
   assert.equal(bs.BUNDLED_BOOKS.length, 1);
   const entry = bs.BUNDLED_BOOKS[0];
@@ -90,9 +92,8 @@ try {
   assert.equal(bs.isBundled('zzzzzzzzzzzzzzzz'), false);
   assert.equal(bs.bundledEntry('zzzzzzzzzzzzzzzz'), null);
   assert.equal(bs.bundledEntry(expectedId).title, '跨块');
-  assert.deepEqual(bs.bundledEntry(expectedId).chapters,
-    [{ title: '正文', offset: 0, length: raw.length }],
-    'bundled metadata must carry the normalized byte chapter index');
+  assert.deepEqual(bs.bundledEntry(expectedId).chapters, [],
+    'shelf catalog stays small; chapter indexes live in the reader bundle');
 
   const read = (offset, size) => settle((done) =>
     bs.readBundledWindow(expectedId, offset, size, done));

@@ -35,6 +35,18 @@ const load = createWatchLoader({ tmpDir: tmp, stubPath,
 
 const BookStorage = await load('storage/BookStorage.js');
 const LibraryIndex = await load('storage/LibraryIndex.js');
+const TransferLogic = await load('wear/TransferLogic.js');
+const receiverStorage = {
+  ensureDirs: BookStorage.ensureDirs,
+  commitVerifiedBook: BookStorage.commitVerifiedBook,
+  copyFile: BookStorage.copyFile,
+  deleteFile: BookStorage.deleteFile,
+  fileSize: BookStorage.fileSize,
+  readWindow: BookStorage.readWindow,
+  tempPath: BookStorage.tempPath,
+  addBook: LibraryIndex.addBook,
+  transferLogic: TransferLogic
+};
 const { IncomingBookReceiver } =
   await load('wear/IncomingBookReceiver.js');
 const { extractFileRef } = await load('wear/WearReceiver.js');
@@ -90,7 +102,8 @@ const okWritebook = (id, title) => {
 {
   const sent = [];
   const receiver = new IncomingBookReceiver(() => {},
-    (text) => sent.push(JSON.parse(text)));
+    (text) => sent.push(JSON.parse(text)),
+    { storage: receiverStorage });
   receiver.onMessage(JSON.stringify(meta));       // 在途 flow-1
   const other = Object.assign({}, meta, {
     transferId: 'flow-2',
@@ -129,7 +142,8 @@ const okWritebook = (id, title) => {
 {
   const sent = [];
   const receiver = new IncomingBookReceiver(() => {},
-    (text) => sent.push(JSON.parse(text)));
+    (text) => sent.push(JSON.parse(text)),
+    { storage: receiverStorage });
   receiver.onMessage(JSON.stringify(meta));
   // 重启：清空接收状态后重发，仍应成功入库。
   receiver.onMessage(JSON.stringify(meta));

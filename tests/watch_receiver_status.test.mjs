@@ -34,8 +34,10 @@ const harnesses = [];
 try {
   const h = createHarness('');
   harnesses.push(h);
+  const app = (await h.loader('app.js')).default;
   const receiver = await h.loader('wear/WearReceiver.js');
   const pageMod = await h.loader('pages/index/index.js');
+  app.onCreate();
   const page = Object.create(pageMod.default);
   page.data = Object.assign({}, pageMod.default.data);
   page.token = 0;
@@ -55,8 +57,10 @@ try {
 
   const good = createHarness('test-phone-app-id');
   harnesses.push(good);
+  const goodApp = (await good.loader('app.js')).default;
   const goodReceiver = await good.loader('wear/WearReceiver.js');
   const goodPageMod = await good.loader('pages/index/index.js');
+  goodApp.onCreate();
   const goodPage = Object.create(goodPageMod.default);
   goodPage.data = Object.assign({}, goodPageMod.default.data);
   goodPage.token = 0;

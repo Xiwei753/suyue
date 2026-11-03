@@ -74,41 +74,33 @@ function settleOperation(cb, task) {
 }
 
 function ensureDir(uri, cb) {
-  let settled = false;
-  const done = (value) => {
-    if (settled) return;
-    settled = true;
-    complete(cb, value);
-  };
-  if (typeof setTimeout === 'function') {
-    setTimeout(() => done({ ok: false, reason: 'timeout' }),
-      OPERATION_TIMEOUT_MS);
-  }
-  try {
-    file.access({
-      uri: uri,
-      success: () => done({ ok: true, existed: true }),
-      fail: (data, code) => {
-        // 301（不存在）是正常首装；其它错误码也照常尝试创建，
-        // 但把 access 的真实 code 带上，绝不把它当成"缺权限"。
-        try {
-          file.mkdir({
-            uri: uri,
-            recursive: true,
-            success: () => done({ ok: true, created: true }),
-            fail: (md, mcode) => done({ ok: false,
-              reason: 'mkdir', code: mcode, accessCode: code })
-          });
-        } catch (error) {
-          done({ ok: false, reason: 'mkdir_throw',
-            accessCode: code, error: String(error) });
+  settleOperation(cb, (done) => {
+    try {
+      file.access({
+        uri: uri,
+        success: () => done({ ok: true, existed: true }),
+        fail: (data, code) => {
+          // 301（不存在）是正常首装；其它错误码也照常尝试创建，
+          // 但把 access 的真实 code 带上，绝不把它当成"缺权限"。
+          try {
+            file.mkdir({
+              uri: uri,
+              recursive: true,
+              success: () => done({ ok: true, created: true }),
+              fail: (md, mcode) => done({ ok: false,
+                reason: 'mkdir', code: mcode, accessCode: code })
+            });
+          } catch (error) {
+            done({ ok: false, reason: 'mkdir_throw',
+              accessCode: code, error: String(error) });
+          }
         }
-      }
-    });
-  } catch (error) {
-    done({ ok: false, reason: 'access_throw',
-      error: String(error) });
-  }
+      });
+    } catch (error) {
+      done({ ok: false, reason: 'access_throw',
+        error: String(error) });
+    }
+  });
 }
 
 export function ensureDirs(cb, onStage) {

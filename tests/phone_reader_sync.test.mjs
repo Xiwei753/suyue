@@ -220,8 +220,16 @@ const watchApp = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/app.js');
 assert.ok(watchReader.includes('getApp().data.wearBridge') &&
   watchIndex.includes('getApp().data.wearBridge') &&
-  watchIndex.includes('handleMessage as handleProgressMessage') &&
-  watchIndex.includes('wear.setProgressSync') &&
+  watchReader.includes("from '../../reader/PageLayout'") &&
+  watchIndex.includes('configureBooks(wear.bookCatalog)') &&
+  watchApp.includes("from './books/BookCatalog.g.js'") &&
+  watchApp.includes('bookStorage: {') &&
+  watchApp.includes('progressStore: {') &&
+  watchIndex.includes('wear.setProgressSync({') &&
+  watchIndex.includes('configureProgressSync(readerStorage)') &&
+  watchIndex.includes('wear.setBookReceiver(new IncomingBookReceiver(') &&
+  watchIndex.includes("from '../../wear/IncomingBookReceiver") &&
+  watchIndex.includes('transferLogic: {') &&
   watchApp.includes('wearBridge:') &&
   watchApp.includes('setApplyHandler') &&
   watchApp.includes('clearApplyHandler') &&
@@ -233,9 +241,13 @@ assert.ok(!watchReader.includes("from '../../wear/") &&
   watchIndex.includes("from '../../wear/IncomingBookReceiver") &&
   watchIndex.includes("from '../../wear/ProgressSync") &&
   !watchApp.includes("from './wear/IncomingBookReceiver") &&
-  !watchApp.includes("from './wear/ProgressSync"),
-  'shelf page must register receiver services while the app bundle stays small');
-assert.ok(watchIndex.includes('clearProgress'),
+  !watchApp.includes("from './wear/ProgressSync") &&
+  !watchReader.includes("from '../../storage/BookStorage") &&
+  !watchReader.includes("from '../../storage/LibraryIndex") &&
+  !watchReader.includes("from '../../storage/ProgressStore") &&
+  !watchReader.includes("from '../../storage/BundledBookSource"),
+  'app hosts storage APIs, shelf configures receive/progress, and reader uses the bridge');
+assert.ok(watchIndex.includes('progressStore.clearProgress'),
   'watch delete must clear progress keys');
 
 const store = read(

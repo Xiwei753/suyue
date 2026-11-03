@@ -10,11 +10,18 @@ import { beginReceive, stopReceive,
   takePendingApply, setActiveBook,
   clearActiveBook, sendMessage,
   reportReceiveStatus } from './wear/WearReceiver';
+import { isLowerHex } from './util/Validate';
+import { ensureDirs as ensureBookDirs, deleteBook as deleteStoredBook,
+  openBook as openStoredBook, readBytes as readStoredBytes,
+  commitVerifiedBook, copyFile, deleteFile, fileSize, readWindow,
+  tempPath } from './storage/BookStorage';
+import { listBooks, removeBook, getBook, addBook } from './storage/LibraryIndex';
+import { loadLastBook, clearProgress, loadProgress, saveProgress,
+  saveLastBook, loadSyncBase, saveSyncBase } from './storage/ProgressStore';
 
 export default {
-  // Page bundles use the Lite JS FA app object to reach the single receiver.
-  // Keeping this bridge here prevents each page bundle from embedding the
-  // receiver, transfer, and progress-sync dependency tree again.
+  // The app bundle owns the one Wear Engine subscription. The shelf installs
+  // book and progress handlers with its injected storage adapters.
   data: {
     wearBridge: {
       getReceiveStatus,
@@ -34,7 +41,35 @@ export default {
       setActiveBook,
       clearActiveBook,
       sendMessage,
-      reportReceiveStatus
+      reportReceiveStatus,
+      isLowerHex,
+      bookStorage: {
+        ensureDirs: ensureBookDirs,
+        deleteBook: deleteStoredBook,
+        openBook: openStoredBook,
+        readBytes: readStoredBytes,
+        commitVerifiedBook,
+        copyFile,
+        deleteFile,
+        fileSize,
+        readWindow,
+        tempPath
+      },
+      libraryIndex: {
+        listBooks,
+        removeBook,
+        getBook,
+        addBook
+      },
+      progressStore: {
+        loadLastBook,
+        clearProgress,
+        loadProgress,
+        saveProgress,
+        saveLastBook,
+        loadSyncBase,
+        saveSyncBase
+      }
     }
   },
   onCreate() {

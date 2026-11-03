@@ -6,21 +6,22 @@
 // 权限 / 探测。外部（手机传书）书目作为**独立第二来源**在后台异步
 // 合并；它失败、超时或不存在，都不会让内置书架失效或卡住启动。
 //
-// 关键：本页**只** import BookCatalog（元数据），正文数据在阅读页
-// 才被 import，因此书架 bundle 不含正文（issue #10 内存要求）。
+// 关键：书架从 app bridge 取得编译期元数据，在本页配置 rawfile
+// 窗口访问器（不含正文）再传给阅读页；小说正文按需读取（issue #10）。
 import router from '@system.router';
 import { BOOKS as CATALOG } from '../../books/BookCatalog.g.js';
-import { ensureDirs, bookPath,
-  deleteBook } from '../../storage/BookStorage';
-import { listBooks, removeBook } from '../../storage/LibraryIndex';
-import { loadLastBook, clearProgress } from '../../storage/ProgressStore';
-import { isLowerHex } from '../../util/Validate';
+import { configureBooks, isBundled, bundledEntry,
+  readBundledWindow } from '../../storage/BundledBookSource.js';
+import { configureServices as configureProgressSync,
+  handleMessage as handleProgressMessage,
+  setApplyHandler as setProgressApplyHandler,
+  clearApplyHandler as clearProgressApplyHandler,
+  takePendingApply as takePendingProgressApply,
+  setActiveBook as setProgressActiveBook,
+  clearActiveBook as clearProgressActiveBook } from '../../wear/ProgressSync';
 import { IncomingBookReceiver } from '../../wear/IncomingBookReceiver';
-import { handleMessage as handleProgressMessage,
-  setApplyHandler, clearApplyHandler, takePendingApply,
-  setActiveBook, clearActiveBook } from '../../wear/ProgressSync';
-
-var bookReceiver = null;
+import { beginTransfer, applyChapterChunk, assembleChapters,
+  missingChapterIndices, createDigestVerifier } from '../../wear/TransferLogic';
 
 function wearBridge() {
   return getApp().data.wearBridge;
@@ -47,19 +48,62 @@ export default {
     this.externalLoaded = false;
     this.lastBookId = '';
     const wear = wearBridge();
-    if (!bookReceiver) {
-      bookReceiver = new IncomingBookReceiver(
-        (message) => wear.reportReceiveStatus(message),
-        (message) => wear.sendMessage(message));
-    }
-    wear.setBookReceiver(bookReceiver);
+    const bundledBooks = configureBooks(CATALOG);
+    const bundledSource = {
+      books: bundledBooks,
+      isBundled: isBundled,
+      bundledEntry: bundledEntry,
+      readBundledWindow: readBundledWindow
+    };
+    getApp().data.bundledBookSource = bundledSource;
+    this.bookStorage = wear.bookStorage;
+    this.libraryIndex = wear.libraryIndex;
+    this.progressStore = wear.progressStore;
+    const storage = this.bookStorage;
+    const library = this.libraryIndex;
+    const progress = this.progressStore;
+    const readerStorage = {
+      getBook: library.getBook,
+      openBook: storage.openBook,
+      readBytes: storage.readBytes,
+      listBooks: library.listBooks,
+      bundledBooks: bundledSource.books,
+      isBundled: bundledSource.isBundled,
+      bundledEntry: bundledSource.bundledEntry,
+      readBundledWindow: bundledSource.readBundledWindow,
+      loadProgress: progress.loadProgress,
+      saveProgress: progress.saveProgress,
+      saveLastBook: progress.saveLastBook,
+      loadSyncBase: progress.loadSyncBase,
+      saveSyncBase: progress.saveSyncBase,
+      isLowerHex: wear.isLowerHex,
+      commitVerifiedBook: storage.commitVerifiedBook,
+      copyFile: storage.copyFile,
+      deleteFile: storage.deleteFile,
+      fileSize: storage.fileSize,
+      readWindow: storage.readWindow,
+      tempPath: storage.tempPath,
+      addBook: library.addBook
+    };
+    getApp().data.readerStorage = readerStorage;
+    wear.setBookReceiver(new IncomingBookReceiver(
+      (message) => wear.reportReceiveStatus(message),
+      (message) => wear.sendMessage(message),
+      { storage: readerStorage, transferLogic: {
+        beginTransfer: beginTransfer,
+        applyChapterChunk: applyChapterChunk,
+        assembleChapters: assembleChapters,
+        missingChapterIndices: missingChapterIndices,
+        createDigestVerifier: createDigestVerifier
+      } }));
+    configureProgressSync(readerStorage);
     wear.setProgressSync({
       handleMessage: handleProgressMessage,
-      setApplyHandler: setApplyHandler,
-      clearApplyHandler: clearApplyHandler,
-      takePendingApply: takePendingApply,
-      setActiveBook: setActiveBook,
-      clearActiveBook: clearActiveBook
+      setApplyHandler: setProgressApplyHandler,
+      clearApplyHandler: clearProgressApplyHandler,
+      takePendingApply: takePendingProgressApply,
+      setActiveBook: setProgressActiveBook,
+      clearActiveBook: clearProgressActiveBook
     });
     wear.configureReceiverServices();
     this.transferStatus = wear.getReceiveStatus();
@@ -93,12 +137,13 @@ export default {
   // 内置书单（同步）：只做一次轻量拷贝，带上 origin。
   bundledList() {
     var out = [];
-    for (var i = 0; i < CATALOG.length; i++) {
+    var catalog = getApp().data.bundledBookSource.books;
+    for (var i = 0; i < catalog.length; i++) {
       out.push({
-        bookId: CATALOG[i].bookId,
-        title: CATALOG[i].title,
-        bytes: CATALOG[i].bytes,
-        chapters: CATALOG[i].chapters || [],
+        bookId: catalog[i].bookId,
+        title: catalog[i].title,
+        bytes: catalog[i].bytes,
+        chapters: catalog[i].chapters || [],
         origin: 'builtin'
       });
     }
@@ -126,7 +171,7 @@ export default {
   loadExternal() {
     const token = this.token;
     try {
-      ensureDirs((dirs) => {
+      this.bookStorage.ensureDirs((dirs) => {
         if (token !== this.token) return;
         if (!dirs.ok) {
           console.error('[suyue] E_EXTERNAL_DIRS ' +
@@ -136,7 +181,7 @@ export default {
           return;
         }
         try {
-          listBooks((books) => {
+          this.libraryIndex.listBooks((books) => {
             if (token !== this.token) return;
             this.external = books;
             this.externalLoaded = true;
@@ -158,7 +203,7 @@ export default {
   // 冷启动续读：只读一个轻量 bookId；书架已经先渲染，存储失败也不阻塞。
   loadResume() {
     try {
-      loadLastBook((state) => {
+      this.progressStore.loadLastBook((state) => {
         this.resumeLoaded = true;
         if (state && state.ok && state.bookId) {
           this.lastBookId = state.bookId;
@@ -270,10 +315,10 @@ export default {
       return;
     }
     this.confirmId = '';
-    deleteBook(book.bookId, (state) => {
+    this.bookStorage.deleteBook(book.bookId, (state) => {
       if (state.ok) {
-        clearProgress(book.bookId, () => {
-          removeBook(book.bookId, () => {
+        this.progressStore.clearProgress(book.bookId, () => {
+          this.libraryIndex.removeBook(book.bookId, () => {
             this.status = '已删除《' + book.title + '》';
             this.loadExternal();
           });

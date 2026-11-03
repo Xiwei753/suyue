@@ -46,9 +46,9 @@ assert.match(run.stdout, /WATCH_BOOKS_TOTAL count=2 /,
 const resFiles = readdirSync(resourceDir);
 assert.ok(resFiles.includes('manifest.json'), 'manifest.json must exist');
 assert.ok(resFiles.includes('books_report.json'), 'report must exist');
-const catFiles = readdirSync(catalogDir);
-assert.deepEqual(catFiles, ['BookCatalog.g.js'],
-  'catalog dir must contain only BookCatalog.g.js');
+const catFiles = readdirSync(catalogDir).sort();
+assert.deepEqual(catFiles, ['BookCatalog.g.js', 'BookChapters.g.js'],
+  'catalog dir must contain compact metadata and chapter modules');
 // 关键：绝不能再生成把正文编译进 JS 的模块。
 for (const f of resFiles.concat(catFiles)) {
   assert.ok(!/^BookText_.*\.g\.js$/.test(f),
@@ -64,6 +64,8 @@ assert.equal(report.mode, 'rawfile');
 assert.equal(report.books.length, 2, 'dedupe to two books');
 
 const catalog = readFileSync(join(catalogDir, 'BookCatalog.g.js'), 'utf8');
+const chapterCatalog = readFileSync(
+  join(catalogDir, 'BookChapters.g.js'), 'utf8');
 assert.match(catalog, /export var BOOKS = \[/);
 assert.ok(!/[A-Za-z0-9+/]{120,}/.test(catalog),
   'BookCatalog must contain metadata only (no text payload)');
@@ -85,9 +87,11 @@ for (const b of report.books) {
     'no reliable headings -> one continuous 正文 chapter');
   assert.ok(catalog.includes(JSON.stringify(b.bookId)) &&
     catalog.includes(JSON.stringify(b.title)) &&
-    catalog.includes(JSON.stringify(b.file)) &&
-    catalog.includes('chapters:'),
-    'catalog must carry bookId/title/file/chapters metadata');
+    catalog.includes(JSON.stringify(b.file)),
+    'compact catalog rows must carry bookId/title/file metadata');
+  assert.ok(chapterCatalog.includes(JSON.stringify(b.bookId)) &&
+    chapterCatalog.includes('[["正文",0]]'),
+    'chapter module must carry compact title and byte-offset pairs');
   // 资源文件必须逐字节等于规范化 UTF-8（BOM 已剥、去重后）。
   const onDisk = readFileSync(join(resourceDir, b.file));
   assert.ok(onDisk.equals(raw),

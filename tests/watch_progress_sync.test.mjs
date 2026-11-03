@@ -21,7 +21,22 @@ const storage = (await import(stub)).default;
 const BookStorage = await load('storage/BookStorage.js');
 const LibraryIndex = await load('storage/LibraryIndex.js');
 const ProgressStore = await load('storage/ProgressStore.js');
+const BundledBookSource = await load('storage/BundledBookSource.js');
+const Validate = await load('util/Validate.js');
 const ProgressSync = await load('wear/ProgressSync.js');
+ProgressSync.configureServices({
+  bundledBooks: BundledBookSource.BUNDLED_BOOKS,
+  readBundledWindow: BundledBookSource.readBundledWindow,
+  listBooks: LibraryIndex.listBooks,
+  readBytes: BookStorage.readBytes,
+  loadProgress: ProgressStore.loadProgress,
+  saveProgress: ProgressStore.saveProgress,
+  loadLastBook: ProgressStore.loadLastBook,
+  saveLastBook: ProgressStore.saveLastBook,
+  loadSyncBase: ProgressStore.loadSyncBase,
+  saveSyncBase: ProgressStore.saveSyncBase,
+  isLowerHex: Validate.isLowerHex
+});
 
 const text = '第一章 你好，世界\n第二段：同步 😀 内容。\n'.repeat(20);
 const bytes = new TextEncoder().encode(text);

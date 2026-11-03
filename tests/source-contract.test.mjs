@@ -250,9 +250,12 @@ assert.ok(!shelfHml.includes('openBook($item.bookId)') &&
 assert.ok(watchIndex.includes("event.type === 'RESULT'") &&
   watchIndex.includes('this.loadExternal();'),
   'watch shelf must refresh external books after a successful receive');
-// issue #10：开机即书架——书架页**同步**渲染内置书单（BookCatalog），
-// 不等待任何文件接口/导入/队列；正文数据只在阅读页 import。
-assert.ok(watchIndex.includes('BookCatalog.g.js') &&
+// issue #10：shelf configures metadata once and renders it synchronously
+// without waiting for file APIs/import queues; bodies stay in rawfile.
+assert.ok(watchIndex.includes("from '../../books/BookCatalog.g.js'") &&
+  watchIndex.includes('configureBooks(CATALOG)') &&
+  watchIndex.includes('getApp().data.bundledBookSource = bundledSource') &&
+  watchIndex.includes('getApp().data.bundledBookSource.books') &&
   watchIndex.includes('bundledList'),
   'shelf must render the build-time catalog synchronously');
 assert.ok(!watchIndex.includes('importBundledBooks') &&
@@ -280,6 +283,10 @@ const catalogSrc = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/books/BookCatalog.g.js');
 assert.ok(catalogSrc.includes('export var BOOKS'),
   'catalog module must export BOOKS metadata');
+const chapterCatalogSrc = read(
+  'watch/huawei/watch-lite/entry/src/main/js/MainAbility/books/BookChapters.g.js');
+assert.ok(chapterCatalogSrc.includes('export var BOOK_CHAPTERS'),
+  'reader chapter metadata must be isolated from the shelf catalog');
 assert.ok(watchReader.includes('isBundled') &&
   watchReader.includes('readBundledWindow'),
   'reader must read bundled text via the rawfile window accessor');
@@ -521,6 +528,8 @@ assert.ok(read('android/app/src/main/java/com/xiwei/suyue/importer/TxtImportServ
 // 尽力发送；文件通道不等待章节 ACK 或手表 RESULT。
 const watchTransferLogic = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/wear/TransferLogic.js');
+const watchSync = read(
+  'watch/huawei/watch-lite/entry/src/main/js/MainAbility/wear/ProgressSync.js');
 assert.ok(watchTransferLogic.includes('applyChapterChunk') &&
   watchTransferLogic.includes('assembleChapters') &&
   watchTransferLogic.includes('E_MISSING_CHAPTERS'),
@@ -532,6 +541,13 @@ assert.ok(chapterReceiver.includes("case 'CHAPTERS'") &&
   chapterReceiver.includes('chapterCatalogInvalid = true') &&
   !chapterReceiver.includes('CHAPTERS_ACK'),
   'watch must treat an incomplete chapter catalog as optional body metadata');
+assert.ok(chapterReceiver.includes('config.transferLogic') &&
+  !chapterReceiver.includes("from './TransferLogic.js"),
+  'page bundle must inject transfer logic into the receiver');
+assert.ok(!chapterReceiver.includes("from '../storage/BookStorage") &&
+  !chapterReceiver.includes("from '../storage/LibraryIndex") &&
+  !watchSync.includes("from '../storage/"),
+  'app-level receiver and progress logic must use injected shelf storage');
 const phoneTransfer = read(
   'harmony/entry/src/main/ets/services/BookTransferService.ts');
 const readerDiagnostics = read(
@@ -591,10 +607,25 @@ assert.ok(watchReceiver.includes('Wear message received type='),
   'watch must log whether HELLO/BOOK_META actually reached the receiver');
 const watchApp = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/app.js');
-assert.ok(watchIndex.includes('IncomingBookReceiver') &&
+assert.ok(!watchApp.includes("from './wear/IncomingBookReceiver") &&
+  watchIndex.includes("from '../../wear/IncomingBookReceiver'") &&
+  watchIndex.includes('new IncomingBookReceiver(') &&
+  watchApp.includes("from './storage/BookStorage'") &&
+  watchApp.includes('bookStorage: {') &&
+  watchApp.includes("from './storage/LibraryIndex'") &&
+  watchApp.includes('libraryIndex: {') &&
+  watchApp.includes("from './storage/ProgressStore'") &&
+  watchApp.includes('progressStore: {') &&
+  !watchApp.includes("from './wear/ProgressSync") &&
+  watchIndex.includes("from '../../wear/ProgressSync'") &&
+  watchIndex.includes('configureProgressSync(readerStorage)') &&
   watchIndex.includes('wear.configureReceiverServices()') &&
-  watchApp.includes('configureReceiverServices'),
-  'shelf must install transfer and progress handlers before subscription starts');
+  watchIndex.includes('wear.setBookReceiver(new IncomingBookReceiver(') &&
+  watchIndex.includes('transferLogic: {') &&
+  watchIndex.includes('wear.setProgressSync({') &&
+  watchApp.includes('configureReceiverServices') &&
+  watchIndex.includes('getApp().data.readerStorage = readerStorage'),
+  'app owns subscription/storage while shelf installs receive and progress handlers');
 const wearDeviceService = read(
   'harmony/entry/src/main/ets/services/WearDeviceService.ts');
 assert.ok(wearDeviceService.includes('receiver registered: bundle='),
@@ -966,8 +997,8 @@ assert.ok(!existsSync(
   'demo generator must be deleted');
 assert.ok(!watchIndex.includes('initializeLibrary'),
   'index page must not call any demo generator');
-assert.ok(watchIndex.includes('BookCatalog.g.js'),
-  'index page must build the shelf from the static catalog');
+assert.ok(watchIndex.includes('bundledBookSource.books'),
+  'index page must build the shelf from generated metadata');
 
 // P1-6：容器检查不得宣称验签；workflow 必须有
 // 官方 hap-sign-tool 验签步骤。

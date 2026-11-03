@@ -27,12 +27,13 @@ export function normalizeChapters(raw, totalBytes) {
   for (var i = 0; i < raw.length; i++) {
     var item = raw[i];
     if (!item || typeof item !== 'object') continue;
-    var offset = item.offset;
+    var offset = Array.isArray(item) ? item[1] : item.offset;
     if (typeof offset !== 'number' || !isFinite(offset) ||
       Math.floor(offset) !== offset || offset < 0) continue;
     if (total > 0 && offset >= total) continue;
-    entries.push({ title: typeof item.title === 'string' ?
-      item.title.trim() : '', offset: offset });
+    var title = Array.isArray(item) ? item[0] : item.title;
+    entries.push({ title: typeof title === 'string' ? title.trim() : '',
+      offset: offset });
   }
   if (entries.length === 0) return fallback(total);
   entries.sort(function (a, b) { return a.offset - b.offset; });

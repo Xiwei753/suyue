@@ -15,22 +15,15 @@
 // - 翻页渲染完成立刻解锁并后台串行保存，进度写不回调也不卡阅读；
 // - 迟到的保存回调不会倒退已变化的阅读位置。
 import router from '@system.router';
-import { getBook } from '../../storage/LibraryIndex';
-import { openBook, readBytes } from '../../storage/BookStorage';
-import { isBundled, bundledEntry,
-  readBundledWindow } from '../../storage/BundledBookSource';
-import { loadProgress,
-  saveProgress, saveLastBook } from '../../storage/ProgressStore';
+import { BOOK_CHAPTERS } from '../../books/BookChapters.g.js';
 import { takeCanvasPage } from '../../reader/PageLayout';
 import { normalizeChapters, chapterIndexAt,
   chapterListRows, chapterLabel } from '../../reader/Chapters';
 import { drawPage } from '../../reader/CanvasTextRenderer';
+import { normalizeSettings } from '../../reader/ReaderSettings';
+import { createCrownTracker, crownStatus } from '../../reader/CrownInput';
 import { loadReaderPreferences, saveReaderPreferences }
   from '../../storage/ReaderPreferences.js';
-import { normalizeSettings } from '../../reader/ReaderSettings';
-import { createCrownTracker,
-  crownStatus } from '../../reader/CrownInput';
-import { isLowerHex } from '../../util/Validate';
 
 function wearBridge() {
   return getApp().data.wearBridge;
@@ -74,6 +67,7 @@ export default {
     chapterNextEnabled: false
   },
   onInit() {
+    this.readerStorage = getApp().data.readerStorage;
     this.history = [];
     this.settings = normalizeSettings(null);
     this.crownStatus = crownStatus();
@@ -106,7 +100,7 @@ export default {
     // 切勿在这里重置 this.bookId，否则会把收到的参数清空。
     const bookId = this.bookId;
     if (typeof bookId !== 'string' ||
-        !isLowerHex(bookId, 16)) {
+        !this.readerStorage.isLowerHex(bookId, 16)) {
       this.readingError = true;
       this.body = '打开失败：未收到有效书籍编号\\n请返回书架重选';
       this.pageHint = '未知书籍，请返回书架选择';
@@ -115,7 +109,7 @@ export default {
     }
     // 内置书（issue #10）：正文来自 rawfile 资源，按需窗口读取；
     // 外部书仍走原有文件通路。两者都**先出正文**再看进度。
-    this.bundled = isBundled(bookId);
+    this.bundled = this.readerStorage.isBundled(bookId);
     const wear = wearBridge();
     wear.setActiveBook(bookId);
     const self = this;
@@ -124,13 +118,14 @@ export default {
     };
     wear.setApplyHandler(this.applyHandler);
     if (this.bundled) {
-      const entry = bundledEntry(bookId);
+      const entry = this.readerStorage.bundledEntry(bookId);
+      if (entry) entry.chapters = BOOK_CHAPTERS[bookId] || entry.chapters;
       this.title = entry ? entry.title : '内置书籍';
       this.setChapters(entry);
       this.startReading();
       return;
     }
-    openBook(bookId, (state) => {
+    this.readerStorage.openBook(bookId, (state) => {
       if (!state.ok) {
         this.readingError = true;
         this.body = '打开失败：书籍不存在或已删除';
@@ -138,7 +133,7 @@ export default {
         this.isBusy = false;
         return;
       }
-      getBook(bookId, (entry) => {
+      this.readerStorage.getBook(bookId, (entry) => {
         this.title = entry ? entry.title : '未知书名';
         this.setChapters(entry);
         this.startReading();
@@ -176,7 +171,7 @@ export default {
   startReading() {
     this.isBusy = true;
     this.setLoadingStage('读取阅读位置');
-    loadProgress(this.bookId, (progress) => {
+    this.readerStorage.loadProgress(this.bookId, (progress) => {
       if (!progress.ok) {
         this.readingError = true;
         this.body = '阅读位置读取失败：' + progress.code;
@@ -257,7 +252,8 @@ export default {
     if (this.isLoading || !this.bookId) return;
     this.isLoading = true;
     this.isBusy = true;
-    const readSource = this.bundled ? readBundledWindow : readBytes;
+    const readSource = this.bundled ?
+      this.readerStorage.readBundledWindow : this.readerStorage.readBytes;
     readSource(this.bookId, offset, 2048, (data) => {
       this.isLoading = false;
       if (!data.ok) {
@@ -379,7 +375,7 @@ export default {
         !pending.skipSave) {
       const self = this;
       this.lastBookSaving = true;
-      saveLastBook(this.bookId, function (result) {
+      this.readerStorage.saveLastBook(this.bookId, function (result) {
         self.lastBookSaving = false;
         if (result && result.ok) self.lastBookSaved = true;
       });
@@ -416,7 +412,7 @@ export default {
   saveNext() {
     this.saving = true;
     this.saveWanted = false;
-    saveProgress(this.bookId, this.offset, this.history,
+    this.readerStorage.saveProgress(this.bookId, this.offset, this.history,
       this.currentSettings(), (state) => {
         this.saving = false;
         if (!state.ok) {
@@ -567,7 +563,8 @@ export default {
   flushPreferences() {
     this.prefSaving = true;
     this.prefWanted = false;
-    saveReaderPreferences(this.bookId, this.currentSettings(), (result) => {
+    saveReaderPreferences(this.bookId,
+      this.currentSettings(), (result) => {
       this.prefSaving = false;
       if (!result.ok) {
         this.pageHint = '设置保存失败：' + (result.code || 'unknown');

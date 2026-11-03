@@ -33,6 +33,18 @@ const load = createWatchLoader({ tmpDir: tmp, stubPath,
 
 const BookStorage = await load('storage/BookStorage.js');
 const LibraryIndex = await load('storage/LibraryIndex.js');
+const TransferLogic = await load('wear/TransferLogic.js');
+const receiverStorage = {
+  ensureDirs: BookStorage.ensureDirs,
+  commitVerifiedBook: BookStorage.commitVerifiedBook,
+  copyFile: BookStorage.copyFile,
+  deleteFile: BookStorage.deleteFile,
+  fileSize: BookStorage.fileSize,
+  readWindow: BookStorage.readWindow,
+  tempPath: BookStorage.tempPath,
+  addBook: LibraryIndex.addBook,
+  transferLogic: TransferLogic
+};
 const { IncomingBookReceiver } =
   await load('wear/IncomingBookReceiver.js');
 const { reportLocalReceiveOutcome } =
@@ -102,7 +114,8 @@ const sentMessages = [];
 const statuses = [];
 const receiver = new IncomingBookReceiver(
   (s) => statuses.push(s),
-  (text) => sentMessages.push(text));
+  (text) => sentMessages.push(text),
+  { storage: receiverStorage });
 receiver.onMessage(JSON.stringify(meta));
 
 const fileOutcome = await wait((cb) =>
@@ -305,6 +318,7 @@ const fakeTimers = new Map();
 const staleStatuses = [];
 const staleReceiver = new IncomingBookReceiver((status) => staleStatuses.push(status),
   () => {}, {
+    storage: receiverStorage,
     staleTimeoutMs: 1000,
     now: () => fakeNow,
     setTimeout: (fn, delay) => {

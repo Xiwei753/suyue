@@ -9,15 +9,15 @@
   · 改为把**规范化后的真实 UTF-8 字节**放进临时构建资源
     `entry/src/main/resources/rawfile/gt4books/<bookId>.txt`
     （hvigor 会真正把它打进内层 entry.bin），页面只带一份
-    **仅含元数据**的 `BookCatalog.g.js`（bookId / 书名 / 字节数 / 资源文件名），
-    **绝不含正文**。这样书架与阅读页 JS 都保持很小。
+    JS 书目仅含紧凑书架元数据，章节索引单独进入阅读页模块，**绝不含正文**。
   · 正文怎么读由设备侧 `storage/BundledBookSource.js` 按需尝试
     （rawfile 窗口读 / 先 copy 到私有目录再窗口读），读不到就如实报错。
 
 产物：
   · --resource-dir/<bookId>.txt    规范化 UTF-8 真实字节（会被清空重建）
   · --resource-dir/manifest.json   每本元数据（供构建/校验）
-  · --catalog-dir/BookCatalog.g.js 仅元数据的 JS 书单
+  · --catalog-dir/BookCatalog.g.js 紧凑书架元数据
+  · --catalog-dir/BookChapters.g.js 阅读页章节索引
   · 报告 books_report.json 写到 --resource-dir（含每本前若干字节的
     base64 前缀，供 tests/build_artifact_check.sh 核对内层 BIN 真带正文）
 
@@ -40,6 +40,7 @@ import prepare_watch_books as prep  # noqa: E402
 
 REPORT_NAME = 'books_report.json'
 CATALOG_NAME = 'BookCatalog.g.js'
+CHAPTERS_NAME = 'BookChapters.g.js'
 # 报告里记录的正文前缀字节数（用于产物校验，不泄漏成段正文）。
 PROBE_BYTES = 64
 
@@ -66,7 +67,7 @@ def write_bytes(path, data):
 
 
 def render_catalog(books):
-    """仅元数据的 JS 书单：bookId / 书名 / 字节数 / 资源文件名 / 章节索引。"""
+    """用于书架的紧凑 JS 书单；章节索引单独放入阅读页模块。"""
     lines = [
         '// SPDX-License-Identifier: GPL-3.0-only',
         '// 构建期生成的内置书单（**仅元数据，绝不含正文**）：issue #10。',
@@ -78,12 +79,29 @@ def render_catalog(books):
     ]
     for b in books:
         lines.append(
-            '  { bookId: %s, title: %s, bytes: %d, file: %s, sha256: %s, chapters: %s },'
+            '  [%s, %s, %d, %s, %s],'
             % (js_string(b['bookId']), js_string(b['title']), b['bytes'],
-               js_string(b['file']), js_string(b['sha256']),
-               json.dumps(b['chapters'], ensure_ascii=False,
-                          separators=(',', ':'))))
+               js_string(b['file']), js_string(b['sha256'])))
     lines.append('];')
+    lines.append('')
+    return '\n'.join(lines)
+
+
+def render_chapters(books):
+    """章节目录只进入阅读页 bundle，避免书架快照承载整份目录。"""
+    lines = [
+        '// SPDX-License-Identifier: GPL-3.0-only',
+        '// 构建期生成的内置书章节索引；只由阅读页导入。',
+        '// 章节偏移是规范化 UTF-8 字节位置，不含正文。',
+        'export var BOOK_CHAPTERS = {',
+    ]
+    for b in books:
+        chapters = [[chapter['title'], chapter['offset']]
+                    for chapter in b['chapters']]
+        lines.append('  %s: %s,' % (
+            js_string(b['bookId']),
+            json.dumps(chapters, ensure_ascii=False, separators=(',', ':'))))
+    lines.append('};')
     lines.append('')
     return '\n'.join(lines)
 
@@ -198,6 +216,8 @@ def main(argv):
 
     write_text(os.path.join(args.catalog_dir, CATALOG_NAME),
                render_catalog(entries))
+    write_text(os.path.join(args.catalog_dir, CHAPTERS_NAME),
+               render_chapters(entries))
 
     report_path = os.path.join(args.resource_dir, REPORT_NAME)
     write_text(report_path, json.dumps({

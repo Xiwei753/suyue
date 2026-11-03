@@ -5,9 +5,8 @@
 // 构建带书时，tools/generate_watch_book_modules.py 会把它覆盖成本次
 // 选定的书籍元数据；构建脚本用 trap 在结束时还原为下面这份空默认值。
 //
-// 字段：bookId（sha256[:16]）、title、bytes（规范化 UTF-8 字节数）、
-//       file（rawfile 资源文件名，通常是 <bookId>.txt）、sha256（全量）、
-//       chapters（构建期章节标题与规范化 UTF-8 字节区间）。
+// 紧凑字段：[bookId, title, bytes, file, sha256]。
+// 章节索引单独放入 BookChapters.g.js，只由阅读页导入，避免书架快照过大。
 // 正文放在 entry/src/main/resources/rawfile/gt4books/<file>，
 // 由 storage/BundledBookSource.js 在设备上按需读取（不在此文件内）。
 export var BOOKS = [];

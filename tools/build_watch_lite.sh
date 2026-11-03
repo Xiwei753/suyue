@@ -30,18 +30,30 @@ HVIGORW="$(command -v hvigorw || echo ./hvigorw)"
 # 此信息只证明本次构建选择了哪个源码版本；最终可安装性
 # 仍必须以签名 HAP/内层 BIN 检查及 GT4 真机安装结果为准。
 WATCH_SOURCE_COMMIT_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
-WATCH_SOURCE_SHA="$(python3 - "$REPO_ROOT/watch/huawei/watch-lite" <<'PY'
+WATCH_SOURCE_SHA="$(python3 - "$REPO_ROOT" <<'PY'
 import hashlib
 from pathlib import Path
 import sys
 
-root = Path(sys.argv[1])
+repo = Path(sys.argv[1])
+root = repo / 'watch' / 'huawei' / 'watch-lite'
+build_inputs = [
+    repo / 'tools' / 'build_watch_lite.sh',
+    repo / 'tools' / 'generate_watch_book_modules.py',
+    repo / 'tools' / 'prepare_watch_books.py',
+    repo / 'tools' / 'inject_signing.py',
+    repo / 'tools' / 'peer_identity_formats.py',
+    repo / 'tools' / 'sign_hap.sh',
+    repo / 'tools' / 'check_lite_bin.py',
+    repo / 'tests' / 'build_artifact_check.sh',
+]
 ignored_dirs = {'.git', '.hvigor', 'node_modules', 'build'}
 digest = hashlib.sha256()
-for path in sorted(p for p in root.rglob('*') if p.is_file() and
-                   not any(part in ignored_dirs
-                           for part in p.relative_to(root).parts[:-1])):
-    relative = path.relative_to(root).as_posix().encode('utf-8')
+paths = [p for p in root.rglob('*') if p.is_file() and
+         not any(part in ignored_dirs for part in p.relative_to(root).parts[:-1])]
+paths.extend(p for p in build_inputs if p.is_file())
+for path in sorted(paths):
+    relative = path.relative_to(repo).as_posix().encode('utf-8')
     content = path.read_bytes()
     digest.update(len(relative).to_bytes(8, 'big'))
     digest.update(relative)
@@ -74,6 +86,7 @@ mkdir -p "$OUT_DIR"
 #   watch/huawei/watch-lite/entry/src/main/resources/rawfile/gt4books/<bookId>.txt
 # 并生成**仅元数据**的
 #   watch/huawei/watch-lite/entry/src/main/js/MainAbility/books/BookCatalog.g.js
+#   watch/huawei/watch-lite/entry/src/main/js/MainAbility/books/BookChapters.g.js
 # 正文不进 JS（避免巨型 reader.js）——那被证明与本机 GT4 安装失败
 # （错误 34）时间相关；设备侧 storage/BundledBookSource.js 按需窗口读
 # rawfile，必要时先 file.copy 到私有目录再读。
@@ -277,6 +290,113 @@ if [ -z "$HAP" ]; then
   exit 1
 fi
 
+# Debug preserves readable bundle formatting, which can put an otherwise
+# modular app over the GT4 per-entry JS budget. Minify the final page bundles,
+# regenerate their JerryScript snapshots, and then repack the Lite single BIN.
+# Release already emits minified page JS and snapshots; it uses the same BIN
+# repack path so books and snapshots share the installable Lite container.
+SDK_ROOT="${HARMONY_SDK_ROOT:-${OHOS_SDK_HOME:-}}"
+if [ -z "$SDK_ROOT" ]; then
+  for candidate in \
+    "$HOME/.harmony-cli/sdk/default/openharmony" \
+    "$HOME/command-line-tools/sdk/default/openharmony"; do
+    if [ -d "$candidate/js/build-tools/ace-loader" ]; then
+      SDK_ROOT="$candidate"
+      break
+    fi
+  done
+fi
+if [ -z "$SDK_ROOT" ]; then
+  echo "ERROR: cannot locate the HarmonyOS SDK for Lite bundle post-processing." >&2
+  exit 1
+fi
+TERSER="$SDK_ROOT/js/build-tools/ace-loader/node_modules/terser/bin/terser"
+JERRY_SNAPSHOT="$SDK_ROOT/js/build-tools/ace-loader/bin/jerry-snapshot"
+HAP_TO_BIN="$SDK_ROOT/js/build-tools/binary-tools/haptobin_tool.jar"
+for tool in "$TERSER" "$JERRY_SNAPSHOT" "$HAP_TO_BIN"; do
+  if [ ! -f "$tool" ]; then
+    echo "ERROR: required Lite post-processing tool not found: $tool" >&2
+    exit 1
+  fi
+done
+echo "WATCH_TERSER_SHA256=$(sha256sum "$TERSER" | awk '{print $1}')"
+echo "WATCH_JERRY_SNAPSHOT_SHA256=$(sha256sum "$JERRY_SNAPSHOT" | awk '{print $1}')"
+echo "WATCH_HAP_TO_BIN_SHA256=$(sha256sum "$HAP_TO_BIN" | awk '{print $1}')"
+
+LITE_SOURCE_DIR="$REPO_ROOT/watch/huawei/watch-lite/entry/build/default/intermediates/lite_source/default"
+PAGE_JS_DIR="$LITE_SOURCE_DIR/assets/js/MainAbility"
+for page in app pages/index/index pages/reader/reader; do
+  if [ "$page" = "app" ]; then
+    js="$PAGE_JS_DIR/app.js"
+  else
+    js="$PAGE_JS_DIR/$page.js"
+  fi
+  bc="${js%.js}.bc"
+  if [ ! -s "$js" ]; then
+    echo "ERROR: Lite page bundle is missing: $js" >&2
+    exit 1
+  fi
+  if [ "$MODE" = "debug" ]; then
+    minified="$js.minified"
+    node "$TERSER" "$js" --compress --mangle --output "$minified"
+    mv "$minified" "$js"
+    "$JERRY_SNAPSHOT" generate -o "$bc" "$js"
+  fi
+  if [ ! -s "$bc" ]; then
+    echo "ERROR: Lite page snapshot is missing after build: $bc" >&2
+    exit 1
+  fi
+  page_size="$(stat -c%s "$js" 2>/dev/null || stat -f%z "$js")"
+  if [ "$page_size" -gt 49152 ]; then
+    echo "ERROR: Lite page JS exceeds 48 KiB: page=$page size=$page_size" >&2
+    exit 1
+  fi
+  echo "WATCH_PAGE_JS page=$page size=$page_size"
+  echo "WATCH_PAGE_SNAPSHOT page=$page size=$(stat -c%s "$bc" 2>/dev/null || stat -f%z "$bc")"
+done
+
+# Repack the post-processed Lite source tree to one BIN. The hvigor release
+# target emits a multi-file HAP, while GT4/HDEA installs the signed single BIN.
+UNSIGNED_BIN="$OUT_DIR/entry-default-repacked.bin"
+java -Dfile.encoding=utf-8 -jar "$HAP_TO_BIN" \
+  --project-path "$LITE_SOURCE_DIR" --bin-path "$UNSIGNED_BIN"
+if [ ! -s "$UNSIGNED_BIN" ]; then
+  echo "ERROR: Lite single-BIN repack produced no output." >&2
+  exit 1
+fi
+if ! python3 - "$UNSIGNED_BIN" <<'PY'
+import sys
+payload = open(sys.argv[1], 'rb').read()
+snapshots = ('app.bc', 'index.bc', 'reader.bc')
+missing = [name for name in snapshots if name.encode('ascii') not in payload]
+if missing:
+    raise SystemExit('FAIL: repacked Lite BIN is missing snapshot entries: '
+                     + ', '.join(missing))
+for name in snapshots:
+    print('WATCH_BIN_SNAPSHOT_PRESENT=' + name)
+PY
+then
+  echo "ERROR: repacked Lite BIN does not contain all three page snapshots." >&2
+  exit 1
+fi
+python3 - "$UNSIGNED_BIN" "$OUT_DIR/entry-default-unsigned.hap" <<'PY'
+import os, sys, zipfile
+bin_path, hap_path = sys.argv[1:]
+part = hap_path + '.repacked'
+with zipfile.ZipFile(part, 'w', compression=zipfile.ZIP_STORED) as archive:
+    archive.write(bin_path, 'entry-default-unsigned.bin')
+with zipfile.ZipFile(part) as archive:
+    entries = archive.infolist()
+    if len(entries) != 1 or entries[0].filename != 'entry-default-unsigned.bin':
+        raise SystemExit('FAIL: repacked Lite HAP is not a single root BIN')
+    if archive.read(entries[0]) != open(bin_path, 'rb').read():
+        raise SystemExit('FAIL: repacked Lite HAP BIN differs from repack output')
+os.replace(part, hap_path)
+PY
+HAP="$OUT_DIR/entry-default-unsigned.hap"
+UNSIGNED=1
+echo "WATCH_LITE_SINGLE_BIN_REPACKED=yes sha256=$(sha256sum "$UNSIGNED_BIN" | awk '{print $1}')"
+
 echo "BUILT_UNSIGNED_HAP_PATH=$REPO_ROOT/watch/huawei/watch-lite/$HAP"
 
 # ---- 签名（issue #2 实测路径）----------------------------------------
@@ -476,20 +596,6 @@ fi
 
 # 单页最终 JS 大小：用于证明「没有巨型 reader.js」（issue #10 复核）。
 # 正文应在 rawfile 资源里，页面 JS 只带书单元数据。
-PAGE_JS_DIR="$REPO_ROOT/watch/huawei/watch-lite/entry/build/default/intermediates/lite_source/default/assets/js/MainAbility"
-if [ -d "$PAGE_JS_DIR" ]; then
-  for page in app index/index reader/reader; do
-    if [ "$page" = "app" ]; then
-      js="$PAGE_JS_DIR/app.js"
-    else
-      js="$PAGE_JS_DIR/pages/$page.js"
-    fi
-    if [ -f "$js" ]; then
-      echo "WATCH_PAGE_JS page=$page size=$(stat -c%s "$js" 2>/dev/null || stat -f%z "$js")"
-    fi
-  done
-fi
-
 if [ "$UNSIGNED" = "0" ]; then
   BIN_BUNDLE="$(python3 "$REPO_ROOT/tools/check_lite_bin.py" \
       --hap "$REPO_ROOT/watch/huawei/watch-lite/$HAP" --bundle 'con.xiwei.suyue.gt4' 2>/dev/null \
