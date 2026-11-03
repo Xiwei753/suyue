@@ -9,7 +9,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeSystemFileStub } from './helpers/system_file_stub.mjs';
-import { createWatchLoader, writeRouterStub, writeStorageStub }
+import { createWatchLoader, writeWearEngineStub,
+  writeRouterStub, writeStorageStub }
   from './helpers/watch_module_loader.mjs';
 
 const tmp = mkdtempSync(join(tmpdir(), 'suyue-stress-'));
@@ -39,10 +40,11 @@ try {
     Buffer.from('长篇小说正文与翻页压力。'.repeat(90000), 'utf8'));
 
   const stubPath = writeSystemFileStub(tmp, disk);
+  const wearengineStubPath = writeWearEngineStub(tmp);
   const storageStubPath = writeStorageStub(tmp);
   const routerStubPath = writeRouterStub(tmp);
   const load = createWatchLoader({ tmpDir: tmp, stubPath,
-    routerStubPath, storageStubPath });
+    wearengineStubPath, routerStubPath, storageStubPath });
   const BookStorage = await load('storage/BookStorage.js');
   const systemFile = (await import(stubPath)).default;
 

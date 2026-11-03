@@ -5,7 +5,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeSystemFileStub } from './helpers/system_file_stub.mjs';
-import { createWatchLoader, writeRouterStub, writeStorageStub }
+import { createWatchLoader, writeWearEngineStub,
+  writeRouterStub, writeStorageStub }
   from './helpers/watch_module_loader.mjs';
 
 const tmp = mkdtempSync(join(tmpdir(), 'suyue-rchapters-'));
@@ -13,6 +14,7 @@ const disk = mkdtempSync(join(tmpdir(), 'suyue-rchapters-fs-'));
 try {
   const load = createWatchLoader({ tmpDir: tmp,
     stubPath: writeSystemFileStub(tmp, disk),
+    wearengineStubPath: writeWearEngineStub(tmp),
     routerStubPath: writeRouterStub(tmp),
     storageStubPath: writeStorageStub(tmp) });
   const mod = await load('pages/reader/reader.js');

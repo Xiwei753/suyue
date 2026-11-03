@@ -6,7 +6,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeSystemFileStub } from './helpers/system_file_stub.mjs';
-import { createWatchLoader, writeRouterStub, writeStorageStub }
+import { createWatchLoader, writeWearEngineStub,
+  writeRouterStub, writeStorageStub }
   from './helpers/watch_module_loader.mjs';
 
 const temp=mkdtempSync(join(tmpdir(),'suyue-progress-'));
@@ -14,10 +15,11 @@ const disk=mkdtempSync(join(tmpdir(),'suyue-progress-disk-'));
 const id='aaaaaaaaaaaaaaaa';
 try {
   const stub=writeStorageStub(temp);
+  const wearengineStubPath=writeWearEngineStub(temp);
   const routerStub=writeRouterStub(temp);
   const fileStub=writeSystemFileStub(temp,disk);
   const load=createWatchLoader({tmpDir:temp,stubPath:fileStub,
-    routerStubPath:routerStub,storageStubPath:stub});
+    wearengineStubPath,routerStubPath:routerStub,storageStubPath:stub});
   const progress=await load('storage/ProgressStore.js');
   const prefs=await load('storage/ReaderPreferences.js');
   const reader=await load('pages/reader/reader.js');

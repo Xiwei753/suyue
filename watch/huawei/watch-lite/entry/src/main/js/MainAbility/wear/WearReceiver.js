@@ -103,9 +103,14 @@ export function onReceiverPageShow(pageName) {
     hasShownPage = true;
     pageWasHidden = false;
     clearPageNavigation();
-    if (!appCreateSeen && !subscribed && !receiveStarting) {
-      notifyReceiverStatus('首屏：未收到 app.onCreate，开始注册');
-      beginReceive('page-show-fallback');
+    if (!subscribed && !receiveStarting) {
+      if (appCreateSeen) {
+        resetAndBeginReceive('first-page-retry',
+          '首屏：启动注册已结束但无订阅，补注册一次');
+      } else {
+        notifyReceiverStatus('首屏：未收到 app.onCreate，开始注册');
+        beginReceive('page-show-fallback');
+      }
     } else {
       console.info('Wear receiver lifecycle: first page shown after app creation');
     }
@@ -131,7 +136,12 @@ export function onReceiverPageShow(pageName) {
 }
 
 function refreshReceiveOnForeground() {
-  notifyReceiverStatus('前台恢复：清理上次订阅并重新注册');
+  resetAndBeginReceive('foreground-resume',
+    '前台恢复：清理上次订阅并重新注册');
+}
+
+function resetAndBeginReceive(trigger, status) {
+  notifyReceiverStatus(status);
   // 让旧异步回调失效，避免迟到的成功把新一轮状态覆盖。
   receiveAttemptId++;
   receiveStarting = false;
@@ -149,7 +159,7 @@ function refreshReceiveOnForeground() {
     }
   }
   subscribeAttempted = false;
-  beginReceive('foreground-resume');
+  beginReceive(trigger);
 }
 
 // Local-only completion event. This does not use sendToPhone / Wear Engine;

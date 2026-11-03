@@ -13,11 +13,13 @@ export function createWatchLoader(options) {
   const wearengineStubPath = options.wearengineStubPath;
   const routerStubPath = options.routerStubPath;
   const storageStubPath = options.storageStubPath;
+  const sourceOverrides = options.sourceOverrides || {};
   const loaded = new Map();
   const load = async (rel) => {
     if (loaded.has(rel)) return loaded.get(rel);
     const srcPath = join(WATCH_ROOT, rel);
-    let src = readFileSync(srcPath, 'utf8');
+    let src = Object.prototype.hasOwnProperty.call(sourceOverrides, rel) ?
+      sourceOverrides[rel] : readFileSync(srcPath, 'utf8');
     const importRe = /from\s+'([^']+)'/g;
     let m;
     const deps = [];
