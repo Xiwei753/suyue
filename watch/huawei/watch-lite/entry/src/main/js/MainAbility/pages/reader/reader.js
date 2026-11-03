@@ -34,6 +34,8 @@ import { isLowerHex } from '../../util/Validate';
 import { setApplyHandler, clearApplyHandler,
   takePendingApply, setActiveBook,
   clearActiveBook } from '../../wear/ProgressSync';
+import { onReceiverPageShow, onReceiverPageHide, markPageNavigation,
+  clearPageNavigation } from '../../wear/WearReceiver';
 
 // 画布初始尺寸（HML width/height 绑定）；真实值以运行时画布为准。
 var CANVAS_SIZE = 452;
@@ -428,8 +430,7 @@ export default {
           this.saveNext();
         } else if (this.returnToShelf) {
           this.returnToShelf = false;
-          router.replace({ uri: 'pages/index/index',
-            params: { resume: '0' } });
+          this.navigateToShelf();
         }
       });
   },
@@ -578,6 +579,7 @@ export default {
   // 隐藏 slider 挂载后抢占表冠焦点；设备上若 $refs.crownProxy
   // 不存在则静默跳过，触屏「上页/下页」照常可用。
   onShow() {
+    onReceiverPageShow('pages/reader/reader');
     this.canvasReady = true;
     this.ctx = null;
     var pendingOffset = takePendingApply(this.bookId);
@@ -600,6 +602,7 @@ export default {
       !this.isLoading && !this.settingsOpen) this.redraw();
   },
   onHide() {
+    onReceiverPageHide();
     this.canvasReady = false;
     this.ctx = null;
     this.focusCrown(false);
@@ -636,11 +639,21 @@ export default {
   backToLibrary() {
     // 必须在退出前等待最后一次阅读位置写入完成（有 2.5 秒上限）。
     if (!this.progressReady || !this.bookId) {
-      router.replace({ uri: 'pages/index/index',
-        params: { resume: '0' } });
+      this.navigateToShelf();
       return;
     }
     this.returnToShelf = true;
     this.scheduleSave();
+  },
+  navigateToShelf() {
+    markPageNavigation('pages/index/index');
+    try {
+      router.replace({ uri: 'pages/index/index',
+        params: { resume: '0' } });
+    } catch (error) {
+      clearPageNavigation();
+      this.pageHint = '返回书架失败：路由异常';
+      console.error('[suyue] E_ROUTE_SHELF ' + error);
+    }
   }
 };

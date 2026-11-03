@@ -13,9 +13,18 @@ import { handleMessage as handleProgressMessage } from './ProgressSync';
 
 let subscribed = false;
 let receiveStarting = false;
+let subscribeAttempted = false;
+let receiveAttemptId = 0;
+let hasShownPage = false;
+let pageWasHidden = false;
+let pageNavigationPending = false;
+let pageNavigationTarget = '';
+let appCreateSeen = false;
 let receiver = null;
 var receiveStatusHandler = null;
 var latestReceiveStatus = '传书未配置';
+var receiverStatusHandler = null;
+var latestReceiverStatus = '接收器：尚未启动';
 // 手表 → 手机的唯一回执通道（wearengine.sendMsg）。
 var sendToPhoneImpl = null;
 // 对端 deviceId。无回调字段时按 Lite Wear Engine 示例使用 'remote'；
@@ -29,6 +38,14 @@ function notifyReceiveStatus(message) {
     receiveStatusHandler(message);
   } else {
     console.info('Wear receiver status: ' + message);
+  }
+}
+
+function notifyReceiverStatus(message) {
+  latestReceiverStatus = message;
+  console.info('Wear receiver status: ' + message);
+  if (typeof receiverStatusHandler === 'function') {
+    receiverStatusHandler(message);
   }
 }
 
@@ -46,6 +63,93 @@ export function getReceiveStatus() {
 export function setReceiveStatusHandler(onStatus) {
   receiveStatusHandler = typeof onStatus === 'function' ? onStatus : null;
   if (receiveStatusHandler) receiveStatusHandler(getReceiveStatus());
+}
+
+export function getReceiverStatus() {
+  return latestReceiverStatus;
+}
+
+export function setReceiverStatusHandler(onStatus) {
+  receiverStatusHandler = typeof onStatus === 'function' ? onStatus : null;
+  if (receiverStatusHandler) receiverStatusHandler(getReceiverStatus());
+}
+
+export function reportAppLifecycle(event) {
+  if (event === 'app.onCreate 已执行') appCreateSeen = true;
+  if (event === 'app.onDestroy 已执行') appCreateSeen = false;
+  notifyReceiverStatus('应用生命周期：' + event);
+}
+
+// 页面切换由应用内路由主动标记，以免把书架↔阅读页误当成退后台。
+export function markPageNavigation(target) {
+  pageNavigationPending = true;
+  pageNavigationTarget = target || '';
+}
+
+export function clearPageNavigation() {
+  pageNavigationPending = false;
+  pageNavigationTarget = '';
+}
+
+export function onReceiverPageHide() {
+  pageWasHidden = true;
+}
+
+// Lite 页面 onShow 同时覆盖应用回到前台和路由切换。路由切换沿用
+// app.js 建立的唯一订阅；只有页面此前隐藏且不是已标记的路由切换，
+// 才清理可能过期的状态并做一次有界重注册，不使用计时器循环。
+export function onReceiverPageShow(pageName) {
+  if (!hasShownPage) {
+    hasShownPage = true;
+    pageWasHidden = false;
+    clearPageNavigation();
+    if (!appCreateSeen && !subscribed && !receiveStarting) {
+      notifyReceiverStatus('首屏：未收到 app.onCreate，开始注册');
+      beginReceive('page-show-fallback');
+    } else {
+      console.info('Wear receiver lifecycle: first page shown after app creation');
+    }
+    return;
+  }
+  if (pageNavigationPending &&
+      (!pageNavigationTarget || pageNavigationTarget === pageName)) {
+    clearPageNavigation();
+    pageWasHidden = false;
+    console.info('Wear receiver lifecycle: route changed; retain app-level subscription');
+    return;
+  }
+  if (pageNavigationPending) {
+    console.info('Wear receiver lifecycle: expected route was not shown');
+    clearPageNavigation();
+  }
+  if (!pageWasHidden) {
+    console.info('Wear receiver lifecycle: page shown without hide; keep subscription');
+    return;
+  }
+  pageWasHidden = false;
+  refreshReceiveOnForeground();
+}
+
+function refreshReceiveOnForeground() {
+  notifyReceiverStatus('前台恢复：清理上次订阅并重新注册');
+  // 让旧异步回调失效，避免迟到的成功把新一轮状态覆盖。
+  receiveAttemptId++;
+  receiveStarting = false;
+  subscribed = false;
+  receiver = null;
+  sendToPhoneImpl = null;
+  peerDeviceId = '';
+  loggedRemoteDeviceDefault = false;
+  if (subscribeAttempted) {
+    try {
+      wearengine.unsubscribeMsg();
+      console.info('unsubscribeMsg requested before foreground re-register');
+    } catch (error) {
+      console.error('foreground unsubscribeMsg failed: ' + error);
+    }
+  }
+  subscribeAttempted = false;
+  beginReceive('foreground-resume');
 }
 
 // Local-only completion event. This does not use sendToPhone / Wear Engine;
@@ -75,15 +179,18 @@ export function capturePeerDevice(data) {
   return '';
 }
 
-export function beginReceive() {
+export function beginReceive(trigger) {
   const notify = notifyReceiveStatus;
   if (!PHONE_APP_ID) {
-    notify('未配置手机 APP ID，传书接收暂未开启');
+    notifyReceiverStatus('接收器未配置：缺少手机 APP ID');
     return;
   }
   if (subscribed || receiveStarting) return;
+  const attemptId = ++receiveAttemptId;
+  const isCurrentAttempt = () => attemptId === receiveAttemptId;
   receiveStarting = true;
-  notify('正在启动传书接收');
+  notifyReceiverStatus('接收器启动：' + (trigger || '应用启动'));
+  notifyReceiverStatus('阶段：读取 Wear Engine 版本');
   // 手表 → 手机：唯一回执通道。
   // 形状以华为 Lite 示例为准（待真机验证）：
   //   wearengine.sendMsg({deviceId, bundleName,
@@ -118,28 +225,39 @@ export function beginReceive() {
     wearengine.getWearEngineVersion({
       sdkVersion: '3',
       complete: (versionString) => {
+        if (!isCurrentAttempt()) return;
         const raw = String(versionString || '').split('.');
         const version = Number(raw[raw.length - 1]) || 0;
         if (version < 401) {
           receiveStarting = false;
-          notify('Wear Engine 版本待适配：' + version);
+          notifyReceiverStatus('结果：Wear Engine 版本待适配 ' +
+            String(versionString || version));
           return;
         }
+        notifyReceiverStatus('阶段：Wear Engine 版本可用 ' +
+          String(versionString || version));
+        notifyReceiverStatus('阶段：设置手机包名');
         wearengine.setPackageName({
           appName: PHONE_BUNDLE_NAME,
           complete: () => {
+            if (!isCurrentAttempt()) return;
             console.info('setPackageName ok: ' + PHONE_BUNDLE_NAME);
+            notifyReceiverStatus('阶段：手机包名已设置；设置 APP ID');
             wearengine.setFingerprint({
               appName: PHONE_BUNDLE_NAME,
               appCert: PHONE_APP_ID,
               complete: () => {
+                if (!isCurrentAttempt()) return;
                 console.info('setFingerprint ok: peer=' +
                   PHONE_BUNDLE_NAME + ' appIdPrefix=' +
                   PHONE_APP_ID.substring(0, 4) + '…');
+                notifyReceiverStatus('阶段：手机 APP ID 已设置；注册消息接收');
                 receiver = new IncomingBookReceiver(
                   notify, sendToPhone);
+                subscribeAttempted = true;
                 wearengine.subscribeMsg({
                   success: (data) => {
+                    if (!isCurrentAttempt()) return;
                     // 先尽力取真实 deviceId，供回执使用；
                     // 取到就记下命中的字段名，便于真机核对。
                     const idField = capturePeerDevice(data);
@@ -151,7 +269,7 @@ export function beginReceive() {
                       receiveStarting = false;
                       console.info('subscribeMsg register ok: peer=' +
                         PHONE_BUNDLE_NAME);
-                      notify('传书接收已开启');
+                      notifyReceiverStatus('注册回调：isRegister=true（可达性待验）');
                     } else if (data && data.isFileType) {
                       // 文件通道到达（P0-2）：字段名
                       // 以 GT4 Lite SDK 实测为准。候选
@@ -159,7 +277,7 @@ export function beginReceive() {
                       // 全部缺失则不落盘、只报状态。
                       const ref = extractFileRef(data);
                       if (!ref) {
-                        notify('文件通道回调缺少文件路径字段');
+                        notifyReceiveStatus('文件通道回调缺少文件路径字段');
                       } else {
                         receiveFile(ref.uri, ref.field);
                       }
@@ -168,32 +286,48 @@ export function beginReceive() {
                     }
                   },
                   fail: (reason, code) => {
+                    if (!isCurrentAttempt()) return;
                     receiveStarting = false;
                     console.error('subscribeMsg failed code=' + code);
-                    notify('接收注册失败：' + code);
+                    notifyReceiverStatus('订阅失败 code=' +
+                      (code === undefined ? 'unknown' : code));
                   }
                 });
               },
               fail: (reason, code) => {
+                if (!isCurrentAttempt()) return;
                 receiveStarting = false;
                 console.error('setFingerprint failed code=' + code +
                   ' peer=' + PHONE_BUNDLE_NAME);
-                notify('手机 APP ID 配置失败：' + code);
+                notifyReceiverStatus('APP ID 设置失败 code=' +
+                  (code === undefined ? 'unknown' : code));
               }
             });
           },
           fail: (reason, code) => {
+            if (!isCurrentAttempt()) return;
             receiveStarting = false;
             console.error('setPackageName failed code=' + code +
               ' peer=' + PHONE_BUNDLE_NAME);
-            notify('手机包名配置失败：' + code);
+            notifyReceiverStatus('包名设置失败 code=' +
+              (code === undefined ? 'unknown' : code));
           }
         });
+      },
+      fail: (reason, code) => {
+        if (!isCurrentAttempt()) return;
+        receiveStarting = false;
+        console.error('getWearEngineVersion failed code=' + code);
+        notifyReceiverStatus('读取版本失败 code=' +
+          (code === undefined ? 'unknown' : code));
       }
     });
   } catch (error) {
+    if (!isCurrentAttempt()) return;
     receiveStarting = false;
-    notify('Wear Engine 不可用：' + (error && error.message || 'unknown'));
+    const reason = error && error.message || 'unknown';
+    console.error('Wear Engine initialization threw: ' + reason);
+    notifyReceiverStatus('Wear Engine 初始化异常');
   }
 }
 
@@ -249,15 +383,26 @@ function receiveFile(filePath, field) {
 }
 
 export function stopReceive() {
+  receiveAttemptId++;
   receiver = null;
   sendToPhoneImpl = null;
+  peerDeviceId = '';
+  loggedRemoteDeviceDefault = false;
   receiveStarting = false;
+  appCreateSeen = false;
+  const shouldUnsubscribe = subscribed || subscribeAttempted;
+  subscribed = false;
+  subscribeAttempted = false;
   receiveStatusHandler = null;
-  if (!subscribed) return;
+  receiverStatusHandler = null;
+  hasShownPage = false;
+  pageWasHidden = false;
+  pageNavigationPending = false;
+  pageNavigationTarget = '';
+  if (!shouldUnsubscribe) return;
   try {
     wearengine.unsubscribeMsg();
   } catch (error) {
     console.error('unsubscribeMsg failed: ' + error);
   }
-  subscribed = false;
 }

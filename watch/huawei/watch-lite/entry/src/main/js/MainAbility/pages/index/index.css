@@ -25,7 +25,7 @@
   width: 100%;
   /* issue #10 真机修复：显式高度，避免 flex 子项高度坍缩导致
      书目一条都看不见；超出可纵向滚动。 */
-  height: 288px;
+  height: 280px;
 }
 /* 关键：list-item 自身必须有非零高度（默认高度为 0），
    否则列表容器可见但每行被压成 0。对照开源示例
@@ -89,8 +89,16 @@
 }
 .foot {
   width: 100%;
-  margin-top: 10px;
+  margin-top: 3px;
   font-size: 13px;
+  text-align: center;
+  color: #8b929d;
+}
+.receiver-foot {
+  width: 100%;
+  height: 18px;
+  margin-top: 6px;
+  font-size: 11px;
   text-align: center;
   color: #8b929d;
 }

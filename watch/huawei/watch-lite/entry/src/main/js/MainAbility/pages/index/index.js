@@ -14,8 +14,10 @@ import { ensureDirs, bookPath,
   deleteBook } from '../../storage/BookStorage';
 import { listBooks, removeBook } from '../../storage/LibraryIndex';
 import { loadLastBook, clearProgress } from '../../storage/ProgressStore';
-import { getReceiveStatus,
-  setReceiveStatusHandler } from '../../wear/WearReceiver';
+import { getReceiveStatus, setReceiveStatusHandler,
+  getReceiverStatus, setReceiverStatusHandler,
+  onReceiverPageShow, onReceiverPageHide, markPageNavigation,
+  clearPageNavigation } from '../../wear/WearReceiver';
 import { isLowerHex } from '../../util/Validate';
 
 export default {
@@ -24,6 +26,7 @@ export default {
     books: [],
     status: '书架就绪',
     transferStatus: '传书未配置',
+    receiverStatus: '接收器：尚未启动',
     confirmId: '',
     // 从阅读页显式返回时传 resume=0，避免又自动打开同一本书。
     resume: '1'
@@ -38,8 +41,12 @@ export default {
     this.externalLoaded = false;
     this.lastBookId = '';
     this.transferStatus = getReceiveStatus();
+    this.receiverStatus = getReceiverStatus();
     setReceiveStatusHandler((message) => {
       this.handleReceiveStatus(message);
+    });
+    setReceiverStatusHandler((message) => {
+      this.receiverStatus = message;
     });
     this.refreshShelf();
     // 2) 后台合入外部（手机传书）书目，绝不阻塞上面的书架。
@@ -49,11 +56,16 @@ export default {
   },
   // 从阅读页返回时刷新外部书目（内置书单固定）。
   onShow() {
+    onReceiverPageShow('pages/index/index');
     this.loadExternal();
     this.tryAutoResume();
   },
+  onHide() {
+    onReceiverPageHide();
+  },
   onDestroy() {
     setReceiveStatusHandler(null);
+    setReceiverStatusHandler(null);
   },
   // 内置书单（同步）：只做一次轻量拷贝，带上 origin。
   bundledList() {
@@ -197,12 +209,14 @@ export default {
     if (!book) return;
     this.resumeDone = true;
     this.status = '正在打开《' + book.title + '》';
+    markPageNavigation('pages/reader/reader');
     try {
       router.replace({
         uri: 'pages/reader/reader',
         params: { bookId: book.bookId }
       });
     } catch (error) {
+      clearPageNavigation();
       this.status = '打开失败：路由异常（E_ROUTE_UNSUPPORTED）';
       console.error('[suyue] E_ROUTE_UNSUPPORTED ' + error);
     }

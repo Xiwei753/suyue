@@ -1,0 +1,24 @@
+2026-11-01 22:43:49.833  2757  2757 I A00007/com.xiwei.suyue/IpcApiUtil: registerCallbackProxy service is P2pManagerImpl , method is getRemoteAppVersion
+2026-11-01 22:43:49.833  2757  2757 D A00007/com.xiwei.suyue/WearEngineProxy: getProxy service has been connected
+2026-11-01 22:43:49.833  2757  2757 I A00007/com.xiwei.suyue/WeIpcRequestClient: invoke ipcRequestNumArray length:108
+2026-11-01 22:43:49.835  2757  2757 I A00007/com.xiwei.suyue/IpcApiUtil: registerCallbackProxy code:0
+2026-11-01 22:43:50.026  2757  2757 D A00007/com.xiwei.suyue/P2pGetRemoteAppVersionPromiseSt: onRemoteMessageRequest code:2
+2026-11-01 22:43:50.027  2757  2757 I A00007/com.xiwei.suyue/P2pGetRemoteAppVersionPromiseSt: onResultData args
+2026-11-01 22:43:50.027  2757  2757 I A00007/com.xiwei.suyue/P2pGetRemoteAppVersionPromiseSt: onResultData AppVersion data.code: 1000003
+2026-11-01 22:43:50.027  2757  2757 I A00007/com.xiwei.suyue/HianalyticsUtil: DoKitAsync addEventProcessor start, method is: getRemoteAppVersion
+2026-11-01 22:43:50.027  2757  2757 I A00007/com.xiwei.suyue/HianalyticsUtil: DoKitAsync end method is: getRemoteAppVersion
+2026-11-01 22:43:50.027  2757  2757 I A00007/com.xiwei.suyue/P2pClientImpl: isRemoteAppInstalled remoteBundleName: con.xiwei.suyue.gt4 isInstalled:true
+2026-11-01 22:43:50.027  2757  2757 I A00007/com.xiwei.suyue/HianalyticsUtil: DoKitAsync addEventProcessor start, method is: isRemoteAppInstalled
+2026-11-01 22:43:50.027  2757  2757 I A00007/com.xiwei.suyue/HianalyticsUtil: DoKitAsync end method is: isRemoteAppInstalled
+2026-11-01 22:43:50.028  2757  2757 I A00000/com.xiwei.suyue/suyue/BookTransferService: sendMessage HELLO bytes=111
+2026-11-01 22:43:50.029  2757  2757 I A00007/com.xiwei.suyue/IpcApiUtil: registerCallbackProxy service is P2pManagerImpl , method is sendMessage
+2026-11-01 22:43:50.029  2757  2757 D A00007/com.xiwei.suyue/WearEngineProxy: getProxy service has been connected
+2026-11-01 22:43:50.029  2757  2757 I A00007/com.xiwei.suyue/WeIpcRequestClient: invoke ipcRequestNumArray length:765
+2026-11-01 22:43:50.032  2757  2757 I A00007/com.xiwei.suyue/IpcApiUtil: registerCallbackProxy code:0
+2026-11-01 22:43:50.083  2757  2757 D A00007/com.xiwei.suyue/CommonPromiseStub: onRemoteMessageRequest code:2
+2026-11-01 22:43:50.083  2757  2757 I A00007/com.xiwei.suyue/CommonPromiseStub: onResultData args
+2026-11-01 22:43:50.083  2757  2757 I A00007/com.xiwei.suyue/HianalyticsUtil: DoKitAsync addEventProcessor start, method is: sendMessage
+2026-11-01 22:43:50.084  2757  2757 I A00007/com.xiwei.suyue/HianalyticsUtil: DoKitAsync end method is: sendMessage
+2026-11-01 22:43:50.084  2757  2757 I A00000/com.xiwei.suyue/suyue/BookTransferService: sendMessage HELLO result=206
+2026-11-01 22:43:50.084  2757  2757 E A00000/com.xiwei.suyue/suyue/BookTransferService: sendBook failed at HELLO: sendMessage code 206
+2026-11-01 22:43:50.095  2757  2757 E C04388/com.xiwei.suyue/file_api: [open.cpp:305->Sync] Failed to open file for libuv error -2
