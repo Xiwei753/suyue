@@ -131,7 +131,6 @@ def read_profile(path, bundle):
 
 def split_der_objects(raw):
     """Split concatenated DER objects without silently dropping bytes."""
-    raw = raw.rstrip(b'\r\n\t ')
     objects = []
     offset = 0
     while offset < len(raw):

@@ -100,6 +100,19 @@ try {
   writeFileSync(chainDer,
     Buffer.concat([readFileSync(leafDer), readFileSync(rootDer)]));
 
+  // DER is length-delimited binary data. Its final content byte can equal
+  // ASCII whitespace and must never be stripped before parsing the TLV.
+  const derTailBoundary = spawnSync('python3', ['-c', [
+    'import sys',
+    `sys.path.insert(0, ${JSON.stringify(join(REPO, 'tools'))})`,
+    'from extract_watch_fingerprint import split_der_objects',
+    'for octet in (0x09, 0x0a, 0x0d, 0x20):',
+    '    der = bytes((0x30, 0x03, 0x04, 0x01, octet))',
+    '    assert split_der_objects(der) == [der], hex(octet)'
+  ].join('\n')], { encoding: 'utf8' });
+  assert.equal(derTailBoundary.status, 0,
+    derTailBoundary.stderr || derTailBoundary.stdout);
+
   const leafSha = expectedSha(leafPem);
   const leafLite = expectedLite(leafPem, WATCH_BUNDLE);
   assert.match(leafSha, /^[0-9a-f]{64}$/);
