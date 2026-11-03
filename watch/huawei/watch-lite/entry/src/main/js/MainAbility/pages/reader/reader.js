@@ -31,11 +31,10 @@ import { normalizeSettings } from '../../reader/ReaderSettings';
 import { createCrownTracker,
   crownStatus } from '../../reader/CrownInput';
 import { isLowerHex } from '../../util/Validate';
-import { setApplyHandler, clearApplyHandler,
-  takePendingApply, setActiveBook,
-  clearActiveBook } from '../../wear/ProgressSync';
-import { onReceiverPageShow, onReceiverPageHide, markPageNavigation,
-  clearPageNavigation } from '../../wear/WearReceiver';
+
+function wearBridge() {
+  return getApp().data.wearBridge;
+}
 
 // 画布初始尺寸（HML width/height 绑定）；真实值以运行时画布为准。
 var CANVAS_SIZE = 452;
@@ -117,12 +116,13 @@ export default {
     // 内置书（issue #10）：正文来自 rawfile 资源，按需窗口读取；
     // 外部书仍走原有文件通路。两者都**先出正文**再看进度。
     this.bundled = isBundled(bookId);
-    setActiveBook(bookId);
+    const wear = wearBridge();
+    wear.setActiveBook(bookId);
     const self = this;
     this.applyHandler = function (payload) {
       self.applyRemoteProgress(payload);
     };
-    setApplyHandler(this.applyHandler);
+    wear.setApplyHandler(this.applyHandler);
     if (this.bundled) {
       const entry = bundledEntry(bookId);
       this.title = entry ? entry.title : '内置书籍';
@@ -579,10 +579,11 @@ export default {
   // 隐藏 slider 挂载后抢占表冠焦点；设备上若 $refs.crownProxy
   // 不存在则静默跳过，触屏「上页/下页」照常可用。
   onShow() {
-    onReceiverPageShow('pages/reader/reader');
+    const wear = wearBridge();
+    wear.onReceiverPageShow('pages/reader/reader');
     this.canvasReady = true;
     this.ctx = null;
-    var pendingOffset = takePendingApply(this.bookId);
+    var pendingOffset = wear.takePendingApply(this.bookId);
     if (pendingOffset !== null) this.pendingRemoteOffset = pendingOffset;
     if (this.pendingRemoteOffset !== null && this.progressReady &&
         !this.isLoading) {
@@ -602,20 +603,21 @@ export default {
       !this.isLoading && !this.settingsOpen) this.redraw();
   },
   onHide() {
-    onReceiverPageHide();
+    wearBridge().onReceiverPageHide();
     this.canvasReady = false;
     this.ctx = null;
     this.focusCrown(false);
   },
   onDestroy() {
+    const wear = wearBridge();
     this.canvasReady = false;
     this.ctx = null;
     this.pending = null;
     if (this.applyHandler) {
-      clearApplyHandler(this.applyHandler);
+      wear.clearApplyHandler(this.applyHandler);
       this.applyHandler = null;
     }
-    clearActiveBook();
+    wear.clearActiveBook();
     this.focusCrown(false);
   },
   focusCrown(focus) {
@@ -646,12 +648,12 @@ export default {
     this.scheduleSave();
   },
   navigateToShelf() {
-    markPageNavigation('pages/index/index');
+    wearBridge().markPageNavigation('pages/index/index');
     try {
       router.replace({ uri: 'pages/index/index',
         params: { resume: '0' } });
     } catch (error) {
-      clearPageNavigation();
+      wearBridge().clearPageNavigation();
       this.pageHint = '返回书架失败：路由异常';
       console.error('[suyue] E_ROUTE_SHELF ' + error);
     }

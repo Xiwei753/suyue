@@ -214,12 +214,22 @@ assert.ok(watchSync.includes('applyHandler') &&
 
 const watchReader = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/reader/reader.js');
-assert.ok(watchReader.includes('setApplyHandler') &&
-  watchReader.includes('clearApplyHandler') &&
-  watchReader.includes('applyRemoteProgress'),
-  'watch reader must apply incoming progress and clear history');
 const watchIndex = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/index/index.js');
+const watchApp = read(
+  'watch/huawei/watch-lite/entry/src/main/js/MainAbility/app.js');
+assert.ok(watchReader.includes('getApp().data.wearBridge') &&
+  watchIndex.includes('getApp().data.wearBridge') &&
+  watchApp.includes('wearBridge:') &&
+  watchApp.includes('setApplyHandler') &&
+  watchApp.includes('clearApplyHandler') &&
+  watchReader.includes('wear.setApplyHandler') &&
+  watchReader.includes('wear.clearApplyHandler') &&
+  watchReader.includes('applyRemoteProgress'),
+  'watch app bridge must retain active-reader progress application');
+assert.ok(!watchReader.includes("from '../../wear/") &&
+  !watchIndex.includes("from '../../wear/"),
+  'watch page bundles must access the app bridge without importing receiver modules');
 assert.ok(watchIndex.includes('clearProgress'),
   'watch delete must clear progress keys');
 

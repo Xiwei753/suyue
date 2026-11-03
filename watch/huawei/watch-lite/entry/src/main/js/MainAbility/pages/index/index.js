@@ -14,11 +14,11 @@ import { ensureDirs, bookPath,
   deleteBook } from '../../storage/BookStorage';
 import { listBooks, removeBook } from '../../storage/LibraryIndex';
 import { loadLastBook, clearProgress } from '../../storage/ProgressStore';
-import { getReceiveStatus, setReceiveStatusHandler,
-  getReceiverStatus, setReceiverStatusHandler,
-  onReceiverPageShow, onReceiverPageHide, markPageNavigation,
-  clearPageNavigation } from '../../wear/WearReceiver';
 import { isLowerHex } from '../../util/Validate';
+
+function wearBridge() {
+  return getApp().data.wearBridge;
+}
 
 export default {
   data: {
@@ -40,12 +40,13 @@ export default {
     this.resumeDone = false;
     this.externalLoaded = false;
     this.lastBookId = '';
-    this.transferStatus = getReceiveStatus();
-    this.receiverStatus = getReceiverStatus();
-    setReceiveStatusHandler((message) => {
+    const wear = wearBridge();
+    this.transferStatus = wear.getReceiveStatus();
+    this.receiverStatus = wear.getReceiverStatus();
+    wear.setReceiveStatusHandler((message) => {
       this.handleReceiveStatus(message);
     });
-    setReceiverStatusHandler((message) => {
+    wear.setReceiverStatusHandler((message) => {
       this.receiverStatus = message;
     });
     this.refreshShelf();
@@ -56,16 +57,17 @@ export default {
   },
   // 从阅读页返回时刷新外部书目（内置书单固定）。
   onShow() {
-    onReceiverPageShow('pages/index/index');
+    wearBridge().onReceiverPageShow('pages/index/index');
     this.loadExternal();
     this.tryAutoResume();
   },
   onHide() {
-    onReceiverPageHide();
+    wearBridge().onReceiverPageHide();
   },
   onDestroy() {
-    setReceiveStatusHandler(null);
-    setReceiverStatusHandler(null);
+    const wear = wearBridge();
+    wear.setReceiveStatusHandler(null);
+    wear.setReceiverStatusHandler(null);
   },
   // 内置书单（同步）：只做一次轻量拷贝，带上 origin。
   bundledList() {
@@ -209,14 +211,14 @@ export default {
     if (!book) return;
     this.resumeDone = true;
     this.status = '正在打开《' + book.title + '》';
-    markPageNavigation('pages/reader/reader');
+    wearBridge().markPageNavigation('pages/reader/reader');
     try {
       router.replace({
         uri: 'pages/reader/reader',
         params: { bookId: book.bookId }
       });
     } catch (error) {
-      clearPageNavigation();
+      wearBridge().clearPageNavigation();
       this.status = '打开失败：路由异常（E_ROUTE_UNSUPPORTED）';
       console.error('[suyue] E_ROUTE_UNSUPPORTED ' + error);
     }

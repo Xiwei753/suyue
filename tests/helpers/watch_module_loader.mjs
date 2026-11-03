@@ -17,6 +17,11 @@ export function createWatchLoader(options) {
   const loaded = new Map();
   const load = async (rel) => {
     if (loaded.has(rel)) return loaded.get(rel);
+    // A Lite JS FA page reaches app-level services through getApp(). Model
+    // that runtime lookup when unit tests load a page module directly.
+    if (rel.startsWith('pages/') && !loaded.has('app.js')) {
+      await load('app.js');
+    }
     const srcPath = join(WATCH_ROOT, rel);
     let src = Object.prototype.hasOwnProperty.call(sourceOverrides, rel) ?
       sourceOverrides[rel] : readFileSync(srcPath, 'utf8');
@@ -55,6 +60,9 @@ export function createWatchLoader(options) {
     writeFileSync(modPath, src);
     const mod = await import(modPath);
     loaded.set(rel, mod);
+    if (rel === 'app.js') {
+      globalThis.getApp = () => mod.default;
+    }
     return mod;
   };
   return load;
