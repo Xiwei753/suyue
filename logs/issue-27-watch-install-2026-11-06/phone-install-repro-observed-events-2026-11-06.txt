@@ -1,0 +1,26 @@
+HDEA installation retry: observed event record
+Date: 2026-11-06 CST
+Source: live HDEA/logcat output observed during the retry. This is a transcription, not a raw log capture.
+HAP: suyue-gt4-issue27-chapter-fix-54a4503-3books-20261106.hap
+HAP SHA-256: 688abbf33cd81b6d603f07631ae4bf9e02b96635046b15882a70f9a3d24ac988
+
+16:46:27.418  HDEA registers for AppManager messages.
+16:46:27.444  HDEA reports one HAP in the install list.
+16:46:27.486  AppManager receiver registration succeeds.
+16:46:48.486  Install tapped for the historical-package HAP.
+16:46:48.989  HAP upload progress begins at 0%.
+16:47:01.931  HAP upload progress reaches 100%.
+16:47:01.933  FileSendCallBack reports resultCode 207.
+16:47:01.973  HDEA reports "send hap file success".
+16:47:01.988  Install-message task submission succeeds.
+16:47:02.026  HDEA reports "send install message success" and 100% message progress.
+16:47:02.572  AppManagerReceiver reports errorCode 0; "start install" follows.
+16:47:02.598  AppManagerReceiver reports errorCode 0; "start install" follows.
+16:47:10.246  AppManagerReceiver reports errorCode 0; "start install" follows.
+16:47:12.519  AppManagerReceiver reports errorCode 0; "start install" follows.
+16:47:17.744  AppManagerReceiver reports errorCode 0; "start install" follows.
+16:47:18.122  AppManagerReceiver reports errorCode 0; "start install" follows.
+16:47:18.185  AppManagerReceiver reports errorCode 0; "start install" follows.
+16:47:18.210  AppManagerReceiver reports errorCode 0.
+
+No explicit install-success or install-failure callback was observed. The saved full logcat files omit these HDEA-specific entries; see README.md.
