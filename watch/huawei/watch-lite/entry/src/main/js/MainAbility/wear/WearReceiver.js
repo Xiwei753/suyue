@@ -49,18 +49,6 @@ function notifyReceiverStatus(message) {
   }
 }
 
-function notifyMessageCallbackError(error) {
-  if (error === 'json-syntax' || error === 'json-error') {
-    notifyReceiveStatus('收到非协议消息');
-  } else if (error === 'unsupported-version') {
-    notifyReceiveStatus('协议版本不支持');
-  } else if (error === 'not-string') {
-    notifyReceiveStatus('消息格式异常：message 不是字符串');
-  } else if (error === 'invalid-envelope') {
-    notifyReceiveStatus('协议消息格式无效');
-  }
-}
-
 export function getReceiveStatus() {
   try {
     const event = JSON.parse(latestReceiveStatus);
@@ -267,9 +255,6 @@ function handleRegisterCallback() {
 
 function handleFileCallback(data) {
   const ref = extractFileRef(data);
-  const summary = receiver && receiver.fileCallbackSummary ?
-    receiver.fileCallbackSummary(data, ref) : '文件回调: receiver=unavailable';
-  notifyReceiverStatus(summary);
   if (!ref) {
     notifyReceiveStatus('文件通道回调缺少文件路径字段');
   } else {
@@ -278,17 +263,11 @@ function handleFileCallback(data) {
 }
 
 function handleMessageCallback(data) {
-  if (!receiver || typeof receiver.inspectMessageCallback !== 'function') {
-    notifyReceiverStatus('消息回调: receiver=unavailable');
+  if (!data || typeof data.message !== 'string') {
+    notifyReceiveStatus('消息格式异常：message 不是字符串');
     return;
   }
-  const inspection = receiver.inspectMessageCallback(data);
-  notifyReceiverStatus('消息回调: ' + inspection.summary);
-  if (inspection.error) {
-    notifyMessageCallbackError(inspection.error);
-  } else {
-    routeMessage(inspection.message);
-  }
+  routeMessage(data.message);
 }
 
 function handleSubscribeSuccess(data, isCurrentAttempt) {
@@ -427,12 +406,27 @@ export function beginReceive(trigger) {
   }
 }
 
-function routeMessage(message) {
-  // subscribeMsg.success 已在唯一入口完成一次 JSON.parse；这里只传递
-  // 受 v/type 校验的对象，避免进度与传书接收器各自重复解析。
-  const type = receiver && receiver.safeProtocolType ?
-    receiver.safeProtocolType(message) : 'invalid';
-  console.info('Wear message received type=' + type);
+function routeMessage(messageText) {
+  let message;
+  try {
+    message = JSON.parse(messageText);
+  } catch (error) {
+    notifyReceiveStatus('收到非协议消息');
+    return;
+  }
+  if (!message || typeof message !== 'object' || Array.isArray(message) ||
+      typeof message.type !== 'string' || message.type.length === 0 ||
+      message.type.length > 64 ||
+      !Object.prototype.hasOwnProperty.call(message, 'v') ||
+      typeof message.v !== 'number') {
+    notifyReceiveStatus('协议消息格式无效');
+    return;
+  }
+  if (message.v !== 0) {
+    notifyReceiveStatus('协议版本不支持');
+    return;
+  }
+  console.info('Wear message received type=' + message.type);
   // 阅读进度是独立小消息，不进入传书状态机；仍复用同一次
   // subscribeMsg 和同一个 sendToPhone 通道。
   if (progressSync && typeof progressSync.handleMessage === 'function' &&

@@ -51,8 +51,8 @@ try {
   const hello = JSON.stringify({ v: 0, type: 'HELLO' });
   wearengine.__emit({ isRegister: false, isFileType: false,
     message: hello });
-  assert.match(page.receiverStatus, /^消息回调: m=string\//);
-  assert.match(page.receiverStatus, /json=ok:HELLO$/);
+  assert.equal(page.receiverStatus,
+    '注册回调：isRegister=true（可达性待验）');
   assert.equal(page.transferStatus, '',
     'HELLO must not surface as unknown or start a transfer');
   assert.equal(wearengine.__calls.filter((call) =>
@@ -62,14 +62,10 @@ try {
   const badJson = '{"v":0,"type":';
   wearengine.__emit({ isRegister: false, isFileType: false,
     message: badJson });
-  assert.match(page.receiverStatus, /json=json-syntax/);
   assert.equal(page.transferStatus, '收到非协议消息');
-  assert.ok(!page.receiverStatus.includes(badJson),
-    'message diagnostics must not expose raw JSON');
 
   wearengine.__emit({ isRegister: false, isFileType: false,
     message: JSON.stringify({ type: 'BOOK_META' }) });
-  assert.match(page.receiverStatus, /json=invalid-envelope$/);
   assert.equal(page.transferStatus, '协议消息格式无效');
 
   const body = Buffer.from('callback path small TXT body\n', 'utf8');
@@ -81,16 +77,11 @@ try {
   // A file callback before any valid BOOK_META cannot enter storage.
   wearengine.__emit({ isRegister: false, isFileType: true,
     file: sourceUri });
-  assert.match(page.receiverStatus, /^文件回调: file=file/);
-  assert.ok(!page.receiverStatus.includes(sourceUri),
-    'file callback status must not expose a local path');
   assert.equal(page.transferStatus, '传书失败：E_PROTOCOL');
 
-  // Non-string SDK messages are diagnosed but deliberately not decoded.
+  // Non-string SDK messages are rejected without inspecting their contents.
   wearengine.__emit({ isRegister: false, isFileType: false,
     message: new Uint8Array([123, 34, 118, 34]) });
-  assert.match(page.receiverStatus,
-    /^消息回调: m=Uint8Array\/4 edge=short .*json=not-string$/);
   assert.equal(page.transferStatus, '消息格式异常：message 不是字符串');
 
   const digest = createHash('sha256').update(body).digest('hex');
@@ -103,9 +94,8 @@ try {
   };
   wearengine.__emit({ isRegister: false, isFileType: false,
     message: JSON.stringify(meta) });
-  assert.match(page.receiverStatus, /json=ok:BOOK_META$/);
   assert.ok(!page.receiverStatus.includes(meta.title),
-    'message callback summary must not expose a book title');
+    'receiver status must not expose a book title');
   assert.equal(page.transferStatus, '接收《回调夹具书》');
 
   wearengine.__emit({ isRegister: false, isFileType: true,
@@ -136,7 +126,7 @@ try {
 
   page.onDestroy();
   app.onDestroy();
-  console.info('PASS: subscribeMsg parses once, dispatches HELLO, summarizes safe callback data, and verifies callback file imports');
+  console.info('PASS: subscribeMsg minimally dispatches protocol messages and verifies callback file imports');
 } finally {
   rmSync(tmp, { recursive: true, force: true });
   rmSync(disk, { recursive: true, force: true });
