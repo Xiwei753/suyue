@@ -1,0 +1,16 @@
+<div class="screen">
+  <div class="panel">
+    <text class="heading">{{ title }}</text>
+    <list class="book-list" if="{{ books.length > 0 }}">
+      <list-item class="book-item" for="{{ books }}" tid="bookId">
+        <div class="book-row" onclick="openBook({{$item.bookId}})">
+          <text class="book-title">{{ $item.title }}</text>
+          <text class="book-meta">{{ $item.bytes }} 字节 · 点按阅读</text>
+        </div>
+      </list-item>
+    </list>
+    <text class="empty" if="{{ books.length === 0 }}">{{ status }}</text>
+    <text class="hint" if="{{ books.length > 0 }}">{{ status }}</text>
+    <text class="entry" onclick="openShelf">进入完整书架</text>
+  </div>
+</div>

@@ -40,7 +40,10 @@
     "js": [
       {
         "pages": [
+          "pages/start/start",
           "pages/index/index",
+          "pages/storage/storage",
+          "pages/receiver/receiver",
           "pages/reader/reader"
         ],
         "name": ".MainAbility"

@@ -26,7 +26,14 @@ import { loadReaderPreferences, saveReaderPreferences }
   from '../../storage/ReaderPreferences.js';
 
 function wearBridge() {
-  return getApp().data.wearBridge;
+  if (typeof getApp !== 'function') return null;
+  try {
+    const app = getApp();
+    return app && app.data && app.data.wearBridge ?
+      app.data.wearBridge : null;
+  } catch (error) {
+    return null;
+  }
 }
 
 // 画布初始尺寸（HML width/height 绑定）；真实值以运行时画布为准。
@@ -67,7 +74,24 @@ export default {
     chapterNextEnabled: false
   },
   onInit() {
-    this.readerStorage = getApp().data.readerStorage;
+    let app = null;
+    try {
+      if (typeof getApp === 'function') app = getApp();
+    } catch (error) {}
+    try {
+      this.readerStorage = app && app.data ? app.data.readerStorage : null;
+    } catch (error) {
+      this.readerStorage = null;
+    }
+    if (!this.readerStorage ||
+        typeof this.readerStorage.isLowerHex !== 'function') {
+      this.readerUnavailable = true;
+      this.readingError = true;
+      this.body = '阅读服务未就绪\n请返回书架重试';
+      this.pageHint = '阅读服务未就绪';
+      this.isBusy = false;
+      return;
+    }
     this.history = [];
     this.settings = normalizeSettings(null);
     this.crownStatus = crownStatus();
@@ -576,11 +600,12 @@ export default {
   // 隐藏 slider 挂载后抢占表冠焦点；设备上若 $refs.crownProxy
   // 不存在则静默跳过，触屏「上页/下页」照常可用。
   onShow() {
+    if (this.readerUnavailable) return;
     const wear = wearBridge();
-    wear.onReceiverPageShow('pages/reader/reader');
+    if (wear) wear.onReceiverPageShow('pages/reader/reader');
     this.canvasReady = true;
     this.ctx = null;
-    var pendingOffset = wear.takePendingApply(this.bookId);
+    var pendingOffset = wear ? wear.takePendingApply(this.bookId) : null;
     if (pendingOffset !== null) this.pendingRemoteOffset = pendingOffset;
     if (this.pendingRemoteOffset !== null && this.progressReady &&
         !this.isLoading) {
@@ -600,7 +625,9 @@ export default {
       !this.isLoading && !this.settingsOpen) this.redraw();
   },
   onHide() {
-    wearBridge().onReceiverPageHide();
+    if (this.readerUnavailable) return;
+    const wear = wearBridge();
+    if (wear) wear.onReceiverPageHide();
     this.canvasReady = false;
     this.ctx = null;
     this.focusCrown(false);
@@ -610,11 +637,11 @@ export default {
     this.canvasReady = false;
     this.ctx = null;
     this.pending = null;
-    if (this.applyHandler) {
+    if (wear && this.applyHandler) {
       wear.clearApplyHandler(this.applyHandler);
       this.applyHandler = null;
     }
-    wear.clearActiveBook();
+    if (wear) wear.clearActiveBook();
     this.focusCrown(false);
   },
   focusCrown(focus) {
@@ -645,12 +672,13 @@ export default {
     this.scheduleSave();
   },
   navigateToShelf() {
-    wearBridge().markPageNavigation('pages/index/index');
+    const wear = wearBridge();
+    if (wear) wear.markPageNavigation('pages/index/index');
     try {
       router.replace({ uri: 'pages/index/index',
         params: { resume: '0' } });
     } catch (error) {
-      wearBridge().clearPageNavigation();
+      if (wear) wear.clearPageNavigation();
       this.pageHint = '返回书架失败：路由异常';
       console.error('[suyue] E_ROUTE_SHELF ' + error);
     }

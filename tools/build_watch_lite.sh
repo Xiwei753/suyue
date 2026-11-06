@@ -325,7 +325,7 @@ echo "WATCH_HAP_TO_BIN_SHA256=$(sha256sum "$HAP_TO_BIN" | awk '{print $1}')"
 
 LITE_SOURCE_DIR="$REPO_ROOT/watch/huawei/watch-lite/entry/build/default/intermediates/lite_source/default"
 PAGE_JS_DIR="$LITE_SOURCE_DIR/assets/js/MainAbility"
-for page in app pages/index/index pages/reader/reader; do
+for page in app pages/start/start pages/index/index pages/storage/storage pages/receiver/receiver pages/reader/reader; do
   if [ "$page" = "app" ]; then
     js="$PAGE_JS_DIR/app.js"
   else
@@ -367,7 +367,7 @@ fi
 if ! python3 - "$UNSIGNED_BIN" <<'PY'
 import sys
 payload = open(sys.argv[1], 'rb').read()
-snapshots = ('app.bc', 'index.bc', 'reader.bc')
+snapshots = ('app.bc', 'start.bc', 'index.bc', 'storage.bc', 'receiver.bc', 'reader.bc')
 missing = [name for name in snapshots if name.encode('ascii') not in payload]
 if missing:
     raise SystemExit('FAIL: repacked Lite BIN is missing snapshot entries: '
@@ -376,7 +376,7 @@ for name in snapshots:
     print('WATCH_BIN_SNAPSHOT_PRESENT=' + name)
 PY
 then
-  echo "ERROR: repacked Lite BIN does not contain all three page snapshots." >&2
+  echo "ERROR: repacked Lite BIN does not contain every page snapshot." >&2
   exit 1
 fi
 python3 - "$UNSIGNED_BIN" "$OUT_DIR/entry-default-unsigned.hap" <<'PY'

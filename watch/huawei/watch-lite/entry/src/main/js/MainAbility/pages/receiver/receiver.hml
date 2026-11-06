@@ -1,0 +1,4 @@
+<div class="screen">
+  <text class="status">{{ status }}</text>
+  <text class="retry" onclick="returnToShelf">返回书架</text>
+</div>
