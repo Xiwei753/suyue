@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { writeSystemFileStub } from './helpers/system_file_stub.mjs';
 import { createWatchLoader, writeWearEngineStub,
   writeRouterStub, writeStorageStub } from './helpers/watch_module_loader.mjs';
+import { initializeWatchRuntime } from './helpers/watch_runtime.mjs';
 
 function createHarness(phoneAppId) {
   const tmp = mkdtempSync(join(tmpdir(), 'suyue-receiver-status-'));
@@ -34,16 +35,9 @@ const harnesses = [];
 try {
   const h = createHarness('');
   harnesses.push(h);
-  const app = (await h.loader('app.js')).default;
   const receiver = await h.loader('wear/WearReceiver.js');
-  const pageMod = await h.loader('pages/index/index.js');
-  app.onCreate();
-  const page = Object.create(pageMod.default);
-  page.data = Object.assign({}, pageMod.default.data);
-  page.token = 0;
-  page.external = [];
-  page.resume = '0';
-  page.onInit();
+  const { app, page } = await initializeWatchRuntime(h.loader,
+    { resume: '0' });
 
   assert.equal(page.transferStatus, '',
     'idle receive status must not claim that phone identity is missing');
@@ -57,16 +51,9 @@ try {
 
   const good = createHarness('test-phone-app-id');
   harnesses.push(good);
-  const goodApp = (await good.loader('app.js')).default;
   const goodReceiver = await good.loader('wear/WearReceiver.js');
-  const goodPageMod = await good.loader('pages/index/index.js');
-  goodApp.onCreate();
-  const goodPage = Object.create(goodPageMod.default);
-  goodPage.data = Object.assign({}, goodPageMod.default.data);
-  goodPage.token = 0;
-  goodPage.external = [];
-  goodPage.resume = '0';
-  goodPage.onInit();
+  const { app: goodApp, page: goodPage } = await initializeWatchRuntime(
+    good.loader, { resume: '0' });
   goodReceiver.beginReceive('test');
   assert.equal(goodPage.receiverStatus,
     '注册回调：isRegister=true（可达性待验）',
@@ -90,6 +77,9 @@ try {
     'idle transfer status row must be hidden on the small watch screen');
   assert.ok(!hml.includes('传书未配置'),
     'the shelf must not hard-code the old false configuration message');
+
+  app.onDestroy();
+  goodApp.onDestroy();
 
   console.info('PASS: receiver configuration, registration, and local import status stay distinct');
 } finally {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Keep the Lite app entry small: the first route is a metadata-only shelf.
-// The full storage and Wear Engine runtime is initialized only after the user
-// enters the functional bookshelf.
+// Keep cold-start imports small. The first visible route starts the bounded
+// storage/receiver setup flow after it has been shown; the shelf remains
+// usable when the optional Wear Engine setup fails.
 export default {
   data: {
     stopWatchReceiver: null

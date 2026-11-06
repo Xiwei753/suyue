@@ -216,37 +216,39 @@ const watchReader = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/reader/reader.js');
 const watchIndex = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/index/index.js');
+const watchStoragePage = read(
+  'watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/storage/storage.js');
+const watchReceiverPage = read(
+  'watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/receiver/receiver.js');
 const watchApp = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/app.js');
-assert.ok(watchReader.includes('getApp().data.wearBridge') &&
-  watchIndex.includes('getApp().data.wearBridge') &&
+assert.ok(watchReader.includes('app.data.wearBridge') &&
+  watchIndex.includes('wearBridge()') &&
   watchReader.includes("from '../../reader/PageLayout'") &&
-  watchIndex.includes('configureBooks(CATALOG)') &&
-  watchIndex.includes("from '../../books/BookCatalog.g.js'") &&
-  watchApp.includes('bookStorage: {') &&
-  watchApp.includes('progressStore: {') &&
-  watchIndex.includes('wear.setProgressSync({') &&
-  watchIndex.includes('configureProgressSync(readerStorage)') &&
-  watchIndex.includes('wear.setBookReceiver(new IncomingBookReceiver(') &&
-  watchIndex.includes("from '../../wear/IncomingBookReceiver") &&
-  watchIndex.includes('transferLogic: {') &&
-  watchApp.includes('wearBridge:') &&
-  watchApp.includes('setApplyHandler') &&
-  watchApp.includes('clearApplyHandler') &&
+  watchStoragePage.includes('configureBooks(CATALOG)') &&
+  watchStoragePage.includes('app.readerStorage = {') &&
+  watchReceiverPage.includes('setProgressSync({') &&
+  watchReceiverPage.includes('configureProgressSync(readerStorage)') &&
+  watchReceiverPage.includes('setBookReceiver(new IncomingBookReceiver(') &&
+  watchReceiverPage.includes("from '../../wear/IncomingBookReceiver") &&
+  watchReceiverPage.includes('transferLogic: {') &&
+  watchReceiverPage.includes('createWearBridge()') &&
+  watchReceiverPage.includes('setApplyHandler') &&
+  watchReceiverPage.includes('clearApplyHandler') &&
   watchReader.includes('wear.setApplyHandler') &&
   watchReader.includes('wear.clearApplyHandler') &&
   watchReader.includes('applyRemoteProgress'),
   'watch app bridge must retain active-reader progress application');
 assert.ok(!watchReader.includes("from '../../wear/") &&
-  watchIndex.includes("from '../../wear/IncomingBookReceiver") &&
-  watchIndex.includes("from '../../wear/ProgressSync") &&
+  watchReceiverPage.includes("from '../../wear/IncomingBookReceiver") &&
+  watchReceiverPage.includes("from '../../wear/ProgressSync") &&
   !watchApp.includes("from './wear/IncomingBookReceiver") &&
   !watchApp.includes("from './wear/ProgressSync") &&
   !watchReader.includes("from '../../storage/BookStorage") &&
   !watchReader.includes("from '../../storage/LibraryIndex") &&
   !watchReader.includes("from '../../storage/ProgressStore") &&
   !watchReader.includes("from '../../storage/BundledBookSource"),
-  'app hosts storage APIs, shelf configures receive/progress, and reader uses the bridge');
+  'storage page owns disk services, receiver page owns Wear setup, and reader uses an optional bridge');
 assert.ok(watchIndex.includes('progressStore.clearProgress'),
   'watch delete must clear progress keys');
 

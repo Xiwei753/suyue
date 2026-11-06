@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { writeSystemFileStub } from './helpers/system_file_stub.mjs';
 import { createWatchLoader, writeWearEngineStub,
   writeRouterStub, writeStorageStub } from './helpers/watch_module_loader.mjs';
+import { initializeWatchRuntime } from './helpers/watch_runtime.mjs';
 
 const tmp = mkdtempSync(join(tmpdir(), 'suyue-message-callback-'));
 const disk = mkdtempSync(join(tmpdir(), 'suyue-message-callback-fs-'));
@@ -29,19 +30,11 @@ try {
         "export const INJECTED_PHONE_APP_ID = '1234567890123456789';"
     }
   });
-  const app = (await load('app.js')).default;
   const wear = await load('wear/WearReceiver.js');
-  const pageModule = await load('pages/index/index.js');
   const wearengine = (await import(pathToFileURL(wearengineStubPath).href))
     .default;
-
-  app.onCreate();
-  const page = Object.create(pageModule.default);
-  page.data = Object.assign({}, pageModule.default.data);
-  page.token = 0;
-  page.external = [];
-  page.resume = '0';
-  page.onInit();
+  const { app, page } = await initializeWatchRuntime(load, { resume: '0' });
+  page.onShow();
 
   const waitFor = async (fn, timeoutMs = 2000) => {
     const start = Date.now();
@@ -142,6 +135,7 @@ try {
   'a rejected callback transfer must clean its temporary file');
 
   page.onDestroy();
+  app.onDestroy();
   console.info('PASS: subscribeMsg parses once, dispatches HELLO, summarizes safe callback data, and verifies callback file imports');
 } finally {
   rmSync(tmp, { recursive: true, force: true });

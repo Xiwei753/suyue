@@ -19,6 +19,7 @@ import { writeSystemFileStub } from './helpers/system_file_stub.mjs';
 import { createWatchLoader, wait, writeWearEngineStub,
   writeRouterStub, writeStorageStub }
   from './helpers/watch_module_loader.mjs';
+import { initializeWatchRuntime } from './helpers/watch_runtime.mjs';
 
 const tmp = mkdtempSync(join(tmpdir(), 'suyue-rcv-'));
 const sandbox = mkdtempSync(join(tmpdir(), 'suyue-fs-'));
@@ -49,7 +50,6 @@ const { IncomingBookReceiver } =
   await load('wear/IncomingBookReceiver.js');
 const { reportLocalReceiveOutcome } =
   await load('wear/WearReceiver.js');
-const shelfMod = await load('pages/index/index.js');
 const { sha256Bytes } = await load('util/Sha256.js');
 
 const enc = new TextEncoder();
@@ -93,18 +93,14 @@ const receivedUri = writeReceived('inbox/book.bin',
   bookBytes);
 
 await wait((cb) => BookStorage.ensureDirs(cb));
-const shelf = Object.create(shelfMod.default);
-shelf.data = Object.assign({}, shelfMod.default.data);
-shelf.token = 0;
-shelf.external = [];
-shelf.resume = '0';
+const { app, page: shelf } = await initializeWatchRuntime(load,
+  { resume: '0' });
 let shelfLoads = 0;
 const loadExternal = shelf.loadExternal;
 shelf.loadExternal = function () {
   shelfLoads++;
   return loadExternal.call(this);
 };
-shelf.onInit();
 assert.equal(await waitFor(() => shelf.externalLoaded), true,
   'the shelf must finish its initial external-library load');
 assert.equal(shelf.books.length, 0,
@@ -387,7 +383,7 @@ assert.equal(finalList.length, 5,
 assert.equal(existsSync(join(sandbox,
   'gt4reader/books.json.tmp')), false);
 
-shelf.onDestroy();
+app.onDestroy();
 console.info('PASS: watch receive loop (file channel, local shelf refresh, ' +
   'message channel, digest/size rejection, ' +
   'serialized index writes); book bytes=' +

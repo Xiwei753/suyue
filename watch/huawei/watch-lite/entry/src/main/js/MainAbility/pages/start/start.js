@@ -7,7 +7,7 @@ export default {
   data: {
     title: '素阅',
     books: [],
-    status: '选择一本书进入阅读'
+    status: '正在准备书架和传书接收器…'
   },
   onInit() {
     var books = [];
@@ -22,26 +22,32 @@ export default {
     }
     this.books = books;
     if (books.length === 0) {
-      this.status = '内置书单为空，可进入完整书架';
+      this.status = '正在读取本地书架…';
+    }
+  },
+  onShow() {
+    // Give the metadata-only first page a visible lifecycle before loading
+    // storage and Wear Engine code. This is bounded to one route attempt.
+    if (!this.bootstrapStarted) this.openShelf();
+  },
+  routeToStorage(selectedBookId, resume) {
+    if (this.bootstrapStarted) return;
+    this.bootstrapStarted = true;
+    try {
+      router.replace({ uri: 'pages/storage/storage', params: {
+        selectedBookId: selectedBookId || '',
+        resume: resume || '1'
+      } });
+    } catch (error) {
+      this.bootstrapStarted = false;
+      this.status = '书架初始化失败，请点按重试';
+      console.error('[suyue] E_START_STORAGE_ROUTE ' + error);
     }
   },
   openBook(bookId) {
-    try {
-      router.replace({ uri: 'pages/index/index', params: {
-        selectedBookId: bookId,
-        resume: '0'
-      } });
-    } catch (error) {
-      this.status = '进入阅读失败，请重开素阅';
-      console.error('[suyue] E_START_ROUTE ' + error);
-    }
+    this.routeToStorage(bookId, '0');
   },
   openShelf() {
-    try {
-      router.replace({ uri: 'pages/index/index', params: { resume: '1' } });
-    } catch (error) {
-      this.status = '打开书架失败，请重开素阅';
-      console.error('[suyue] E_START_SHELF_ROUTE ' + error);
-    }
+    this.routeToStorage('', '1');
   }
 };

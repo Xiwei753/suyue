@@ -11,7 +11,8 @@ const phoneIndex = read('harmony/entry/src/main/ets/pages/Index.ets');
 const phoneAppJson = JSON.parse(read('harmony/AppScope/app.json5'));
 const watchPages = watchConfig.module.js[0].pages;
 assert.equal(watchConfig.module.deviceType[0], 'liteWearable');
-assert.deepEqual(watchPages, ['pages/index/index', 'pages/reader/reader']);
+assert.deepEqual(watchPages, ['pages/start/start', 'pages/index/index',
+  'pages/storage/storage', 'pages/receiver/receiver', 'pages/reader/reader']);
 for (const page of watchPages) {
   for (const ext of ['js', 'hml', 'css']) {
     assert.ok(existsSync('watch/huawei/watch-lite/entry/src/main/js/MainAbility/' + page + '.' + ext));
@@ -201,6 +202,9 @@ const crownInput = read('watch/huawei/watch-lite/entry/src/main/js/MainAbility/r
 assert.ok(crownInput.includes("'unverified'"),
   'crown input must not claim verified support without a device run');
 const watchIndex = read('watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/index/index.js');
+const watchStart = read('watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/start/start.js');
+const watchStoragePage = read('watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/storage/storage.js');
+const watchReceiverPage = read('watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/receiver/receiver.js');
 assert.ok(watchIndex.includes('listBooks'),
   'index page must list the real library');
 assert.ok(watchIndex.includes('askDelete'),
@@ -253,9 +257,9 @@ assert.ok(watchIndex.includes("event.type === 'RESULT'") &&
 // issue #10：shelf configures metadata once and renders it synchronously
 // without waiting for file APIs/import queues; bodies stay in rawfile.
 assert.ok(watchIndex.includes("from '../../books/BookCatalog.g.js'") &&
-  watchIndex.includes('configureBooks(CATALOG)') &&
-  watchIndex.includes('getApp().data.bundledBookSource = bundledSource') &&
-  watchIndex.includes('getApp().data.bundledBookSource.books') &&
+  watchStoragePage.includes('configureBooks(CATALOG)') &&
+  watchStoragePage.includes('app.readerStorage = {') &&
+  watchStoragePage.includes('bundledBooks: books') &&
   watchIndex.includes('bundledList'),
   'shelf must render the build-time catalog synchronously');
 assert.ok(!watchIndex.includes('importBundledBooks') &&
@@ -607,25 +611,33 @@ assert.ok(watchReceiver.includes('Wear message received type='),
   'watch must log whether HELLO/BOOK_META actually reached the receiver');
 const watchApp = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/app.js');
-assert.ok(!watchApp.includes("from './wear/IncomingBookReceiver") &&
-  watchIndex.includes("from '../../wear/IncomingBookReceiver'") &&
-  watchIndex.includes('new IncomingBookReceiver(') &&
-  watchApp.includes("from './storage/BookStorage'") &&
-  watchApp.includes('bookStorage: {') &&
-  watchApp.includes("from './storage/LibraryIndex'") &&
-  watchApp.includes('libraryIndex: {') &&
-  watchApp.includes("from './storage/ProgressStore'") &&
-  watchApp.includes('progressStore: {') &&
-  !watchApp.includes("from './wear/ProgressSync") &&
-  watchIndex.includes("from '../../wear/ProgressSync'") &&
-  watchIndex.includes('configureProgressSync(readerStorage)') &&
-  watchIndex.includes('wear.configureReceiverServices()') &&
-  watchIndex.includes('wear.setBookReceiver(new IncomingBookReceiver(') &&
-  watchIndex.includes('transferLogic: {') &&
-  watchIndex.includes('wear.setProgressSync({') &&
-  watchApp.includes('configureReceiverServices') &&
-  watchIndex.includes('getApp().data.readerStorage = readerStorage'),
-  'app owns subscription/storage while shelf installs receive and progress handlers');
+assert.ok(!watchApp.includes("from './wear/") &&
+  !watchApp.includes("from './storage/") &&
+  !watchStart.includes("from '../../wear/") &&
+  !watchStart.includes("from '../../storage/") &&
+  watchStart.includes('onShow()') &&
+  watchStart.includes("this.openShelf()") &&
+  watchStart.includes('if (this.bootstrapStarted) return;') &&
+  watchStart.includes("uri: 'pages/storage/storage'") &&
+  watchStoragePage.includes("uri: 'pages/receiver/receiver'") &&
+  watchReceiverPage.includes("from '../../wear/IncomingBookReceiver'") &&
+  watchReceiverPage.includes("from '../../wear/ProgressSync'") &&
+  !watchReceiverPage.includes('wear.setBookReceiver') &&
+  watchReceiverPage.includes('setBookReceiver(new IncomingBookReceiver(') &&
+  watchReceiverPage.includes('configureReceiverServices()') &&
+  watchReceiverPage.includes("beginReceive('pages/receiver/receiver.onInit')"),
+  'light entry must automatically reach one receiver setup before the usable shelf');
+assert.ok(watchIndex.includes('data.wearBridge') &&
+  watchIndex.includes('progressStore.clearProgress') &&
+  watchIndex.includes('this.runtimeReady = true') &&
+  watchIndex.includes('if (!this.runtimeReady) return;') &&
+  watchIndex.includes("router.replace({\n        uri: 'pages/reader/reader'") &&
+  !watchIndex.includes("打开失败：阅读服务未就绪"),
+  'the shelf must gate storage reads and open local books without Wear Engine');
+assert.ok(watchReader.includes('Wear Engine is optional for local reading') &&
+  watchReader.includes("typeof wear.setActiveBook === 'function'") &&
+  watchReader.includes("typeof wear.setApplyHandler === 'function'"),
+  'reader must keep local reading independent from an unavailable Wear bridge');
 const wearDeviceService = read(
   'harmony/entry/src/main/ets/services/WearDeviceService.ts');
 assert.ok(wearDeviceService.includes('receiver registered: bundle='),
@@ -997,8 +1009,10 @@ assert.ok(!existsSync(
   'demo generator must be deleted');
 assert.ok(!watchIndex.includes('initializeLibrary'),
   'index page must not call any demo generator');
-assert.ok(watchIndex.includes('bundledBookSource.books'),
-  'index page must build the shelf from generated metadata');
+assert.ok(watchStoragePage.includes('bundledBooks: books') &&
+  watchIndex.includes('catalogBooks()') &&
+  watchIndex.includes('bundledList'),
+  'storage must publish the generated metadata to the real shelf');
 
 // P1-6：容器检查不得宣称验签；workflow 必须有
 // 官方 hap-sign-tool 验签步骤。

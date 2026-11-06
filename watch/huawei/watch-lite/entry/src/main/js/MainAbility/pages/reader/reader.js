@@ -135,12 +135,18 @@ export default {
     // 外部书仍走原有文件通路。两者都**先出正文**再看进度。
     this.bundled = this.readerStorage.isBundled(bookId);
     const wear = wearBridge();
-    wear.setActiveBook(bookId);
     const self = this;
     this.applyHandler = function (payload) {
       self.applyRemoteProgress(payload);
     };
-    wear.setApplyHandler(this.applyHandler);
+    // Wear Engine is optional for local reading. A receiver setup failure
+    // must not prevent opening a book already stored on the watch.
+    if (wear && typeof wear.setActiveBook === 'function') {
+      wear.setActiveBook(bookId);
+    }
+    if (wear && typeof wear.setApplyHandler === 'function') {
+      wear.setApplyHandler(this.applyHandler);
+    }
     if (this.bundled) {
       const entry = this.readerStorage.bundledEntry(bookId);
       if (entry) entry.chapters = BOOK_CHAPTERS[bookId] || entry.chapters;
@@ -602,10 +608,14 @@ export default {
   onShow() {
     if (this.readerUnavailable) return;
     const wear = wearBridge();
-    if (wear) wear.onReceiverPageShow('pages/reader/reader');
+    if (wear && typeof wear.onReceiverPageShow === 'function') {
+      wear.onReceiverPageShow('pages/reader/reader');
+    }
     this.canvasReady = true;
     this.ctx = null;
-    var pendingOffset = wear ? wear.takePendingApply(this.bookId) : null;
+    var pendingOffset = wear &&
+      typeof wear.takePendingApply === 'function' ?
+      wear.takePendingApply(this.bookId) : null;
     if (pendingOffset !== null) this.pendingRemoteOffset = pendingOffset;
     if (this.pendingRemoteOffset !== null && this.progressReady &&
         !this.isLoading) {
@@ -627,7 +637,9 @@ export default {
   onHide() {
     if (this.readerUnavailable) return;
     const wear = wearBridge();
-    if (wear) wear.onReceiverPageHide();
+    if (wear && typeof wear.onReceiverPageHide === 'function') {
+      wear.onReceiverPageHide();
+    }
     this.canvasReady = false;
     this.ctx = null;
     this.focusCrown(false);
@@ -637,11 +649,14 @@ export default {
     this.canvasReady = false;
     this.ctx = null;
     this.pending = null;
-    if (wear && this.applyHandler) {
+    if (wear && this.applyHandler &&
+        typeof wear.clearApplyHandler === 'function') {
       wear.clearApplyHandler(this.applyHandler);
       this.applyHandler = null;
     }
-    if (wear) wear.clearActiveBook();
+    if (wear && typeof wear.clearActiveBook === 'function') {
+      wear.clearActiveBook();
+    }
     this.focusCrown(false);
   },
   focusCrown(focus) {
@@ -673,12 +688,16 @@ export default {
   },
   navigateToShelf() {
     const wear = wearBridge();
-    if (wear) wear.markPageNavigation('pages/index/index');
+    if (wear && typeof wear.markPageNavigation === 'function') {
+      wear.markPageNavigation('pages/index/index');
+    }
     try {
       router.replace({ uri: 'pages/index/index',
         params: { resume: '0' } });
     } catch (error) {
-      if (wear) wear.clearPageNavigation();
+      if (wear && typeof wear.clearPageNavigation === 'function') {
+        wear.clearPageNavigation();
+      }
       this.pageHint = '返回书架失败：路由异常';
       console.error('[suyue] E_ROUTE_SHELF ' + error);
     }

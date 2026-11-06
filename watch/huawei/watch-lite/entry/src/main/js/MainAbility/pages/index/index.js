@@ -60,6 +60,8 @@ export default {
   onInit() {
     // This route stays small and displays metadata before runtime setup.
     this.token = (this.token || 0) + 1;
+    this.runtimeReady = false;
+    this.hasShownShelf = false;
     this.external = [];
     this.resumeWanted = this.resume !== '0' && !this.selectedBookId;
     this.resumeLoaded = false;
@@ -108,6 +110,7 @@ export default {
       loadLastBook: this.readerStorage.loadLastBook,
       clearProgress: this.readerStorage.clearProgress
     };
+    this.runtimeReady = true;
 
     if (!app.wearRuntimeInitialized) {
       try {
@@ -154,18 +157,32 @@ export default {
   // 从阅读页返回时刷新外部书目（内置书单固定）。
   onShow() {
     const wear = wearBridge();
-    if (wear) wear.onReceiverPageShow('pages/index/index');
+    if (wear && typeof wear.onReceiverPageShow === 'function') {
+      wear.onReceiverPageShow('pages/index/index');
+    }
+    // onShow can run on an index instance that is about to route through
+    // storage/receiver. Do not turn that early lifecycle into a false
+    // completed external-library load.
+    if (!this.runtimeReady) return;
+    if (!this.hasShownShelf) {
+      this.hasShownShelf = true;
+      return;
+    }
     this.loadExternal();
     this.tryAutoResume();
   },
   onHide() {
     const wear = wearBridge();
-    if (wear) wear.onReceiverPageHide();
+    if (wear && typeof wear.onReceiverPageHide === 'function') {
+      wear.onReceiverPageHide();
+    }
   },
   onDestroy() {
     const wear = wearBridge();
-    if (wear) {
+    if (wear && typeof wear.setReceiveStatusHandler === 'function') {
       wear.setReceiveStatusHandler(null);
+    }
+    if (wear && typeof wear.setReceiverStatusHandler === 'function') {
       wear.setReceiverStatusHandler(null);
     }
   },
@@ -204,6 +221,7 @@ export default {
   },
   // 后台加载外部书目。任何失败都只记录，不影响内置书架。
   loadExternal() {
+    if (!this.runtimeReady || !this.bookStorage || !this.libraryIndex) return;
     const token = this.token;
     try {
       this.bookStorage.ensureDirs((dirs) => {
@@ -237,6 +255,7 @@ export default {
   },
   // 冷启动续读：只读一个轻量 bookId；书架已经先渲染，存储失败也不阻塞。
   loadResume() {
+    if (!this.runtimeReady || !this.progressStore) return;
     try {
       this.progressStore.loadLastBook((state) => {
         this.resumeLoaded = true;
@@ -251,7 +270,8 @@ export default {
     }
   },
   tryAutoResume() {
-    if (!this.resumeWanted || this.resumeDone || !this.resumeLoaded) return;
+    if (!this.runtimeReady || !this.resumeWanted || this.resumeDone ||
+        !this.resumeLoaded) return;
     if (!this.lastBookId) {
       if (this.externalLoaded) this.resumeDone = true;
       return;
@@ -311,20 +331,20 @@ export default {
     const book = this.findBook(bookId);
     if (!book) return;
     const wear = wearBridge();
-    if (!wear) {
-      this.status = '打开失败：阅读服务未就绪';
-      return;
-    }
     this.resumeDone = true;
     this.status = '正在打开《' + book.title + '》';
-    wear.markPageNavigation('pages/reader/reader');
+    if (wear && typeof wear.markPageNavigation === 'function') {
+      wear.markPageNavigation('pages/reader/reader');
+    }
     try {
       router.replace({
         uri: 'pages/reader/reader',
         params: { bookId: book.bookId }
       });
     } catch (error) {
-      wear.clearPageNavigation();
+      if (wear && typeof wear.clearPageNavigation === 'function') {
+        wear.clearPageNavigation();
+      }
       this.status = '打开失败：路由异常（E_ROUTE_UNSUPPORTED）';
       console.error('[suyue] E_ROUTE_UNSUPPORTED ' + error);
     }

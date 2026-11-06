@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { writeSystemFileStub } from './helpers/system_file_stub.mjs';
 import { createWatchLoader, writeRouterStub, writeStorageStub }
   from './helpers/watch_module_loader.mjs';
+import { initializeWatchRuntime } from './helpers/watch_runtime.mjs';
 
 const peerConfig = `
 export const PHONE_BUNDLE_NAME = 'com.xiwei.suyue';
@@ -69,21 +70,15 @@ try {
   {
     const h = createHarness(true);
     harnesses.push(h);
-    const app = (await h.load('app.js')).default;
     const receiver = await h.load('wear/WearReceiver.js');
-    const pageMod = await h.load('pages/index/index.js');
     const { control } = await import(h.wearengineStubPath);
 
-    app.onCreate();
-    const page = Object.create(pageMod.default);
-    page.data = Object.assign({}, pageMod.default.data);
-    page.external = [];
-    page.resume = '0';
-    page.onInit();
+    const { app, page } = await initializeWatchRuntime(h.load,
+      { resume: '0' });
     assert.equal(calls(control, 'getWearEngineVersion'), 1);
     assert.equal(receiver.getReceiverStatus(), '读取版本失败 code=206');
 
-    receiver.onReceiverPageShow('pages/index/index');
+    page.onShow();
     assert.equal(calls(control, 'getWearEngineVersion'), 2,
       'first page must retry one failed app.onCreate registration');
     assert.equal(receiver.getReceiverStatus(), '读取版本失败 code=206');
@@ -98,20 +93,14 @@ try {
   {
     const h = createHarness(false);
     harnesses.push(h);
-    const app = (await h.load('app.js')).default;
     const receiver = await h.load('wear/WearReceiver.js');
-    const pageMod = await h.load('pages/index/index.js');
     const { control } = await import(h.wearengineStubPath);
 
-    app.onCreate();
-    const page = Object.create(pageMod.default);
-    page.data = Object.assign({}, pageMod.default.data);
-    page.external = [];
-    page.resume = '0';
-    page.onInit();
+    const { app, page } = await initializeWatchRuntime(h.load,
+      { resume: '0' });
     assert.equal(calls(control, 'getWearEngineVersion'), 1);
     assert.equal(calls(control, 'subscribeMsg'), 1);
-    receiver.onReceiverPageShow('pages/index/index');
+    page.onShow();
 
     receiver.markPageNavigation('pages/reader/reader');
     receiver.onReceiverPageHide();

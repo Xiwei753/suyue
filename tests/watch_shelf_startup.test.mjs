@@ -27,11 +27,21 @@ const load = createWatchLoader({ tmpDir: tmp, stubPath,
   wearengineStubPath, routerStubPath, storageStubPath });
 
 const pageMod = await load('pages/index/index.js');
+const storagePageMod = await load('pages/storage/storage.js');
+const app = (await load('app.js')).default;
 const BookStorage = await load('storage/BookStorage.js');
 const LibraryIndex = await load('storage/LibraryIndex.js');
 const systemFile = (await import(stubPath)).default;
 const router = (await import(routerStubPath)).default;
 const storage = (await import(storageStubPath)).default;
+
+// The startup route initializes storage before showing this shelf. Model a
+// failed/absent optional Wear Engine runtime so local shelf actions remain
+// available without a communication bridge.
+const storagePage = Object.create(storagePageMod.default);
+storagePage.data = Object.assign({}, storagePageMod.default.data);
+storagePage.onInit();
+app.data.wearRuntimeInitialized = true;
 
 BookStorage.setOperationTimeout(120);
 LibraryIndex.setQueueTimeout(60);
@@ -59,7 +69,7 @@ function newPage() {
 }
 
 
-// ---- 1. 启动同步渲染内置书架；文件层完全不响应也不影响 ----
+// ---- 1. 进入完整书架后先同步渲染内置书架；文件层不响应也不影响 ----
 {
   clearLibrary();
   // 1a. 书架在外部加载开始之前就已经渲染好。
@@ -247,5 +257,5 @@ function newPage() {
 
 rmSync(tmp, { recursive: true, force: true });
 rmSync(sandbox, { recursive: true, force: true });
-console.info('PASS: 开机即书架——启动同步显示书单、不读 books.json、' +
+console.info('PASS: 初始化后书架同步显示书单、不读 books.json、' +
   '索引损坏不阻塞、外部书目后台合入、冷启动续读（issue #10/#17）');
