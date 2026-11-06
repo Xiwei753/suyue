@@ -74,6 +74,7 @@ export function writeWearEngineStub(tmpDir,
   const stubPath = join(tmpDir, stubName);
   writeFileSync(stubPath, `
 const calls = [];
+let subscribeOptions = null;
 const stub = {
   getWearEngineVersion(o) {
     calls.push(['getWearEngineVersion']);
@@ -89,6 +90,7 @@ const stub = {
   },
   subscribeMsg(o) {
     calls.push(['subscribeMsg']);
+    subscribeOptions = o || null;
     o && o.success && o.success({ isRegister: true });
   },
   unsubscribeMsg() { calls.push(['unsubscribeMsg']); },
@@ -98,6 +100,10 @@ const stub = {
   }
 };
 stub.__calls = calls;
+stub.__emit = (data) => {
+  subscribeOptions && subscribeOptions.success &&
+    subscribeOptions.success(data);
+};
 export default stub;
 `);
   return stubPath;

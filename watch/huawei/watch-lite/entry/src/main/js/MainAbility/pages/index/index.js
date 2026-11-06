@@ -27,6 +27,12 @@ function wearBridge() {
   return getApp().data.wearBridge;
 }
 
+function isValidBookId(bookId) {
+  const validate = wearBridge().isLowerHex;
+  return typeof bookId === 'string' && typeof validate === 'function' &&
+    validate(bookId, 16);
+}
+
 export default {
   data: {
     title: '素阅',
@@ -63,6 +69,7 @@ export default {
     const library = this.libraryIndex;
     const progress = this.progressStore;
     const readerStorage = {
+      ensureDirs: storage.ensureDirs,
       getBook: library.getBook,
       openBook: storage.openBook,
       readBytes: storage.readBytes,
@@ -258,7 +265,7 @@ export default {
   },
   // 查找当前书架里指定的书（bookId 必须是 16 位小写十六进制）。
   findBook(bookId) {
-    if (typeof bookId !== 'string' || !isLowerHex(bookId, 16)) {
+    if (!isValidBookId(bookId)) {
       this.status = '打开失败：参数无效（E_BOOK_ID_INVALID）';
       console.error('[suyue] E_BOOK_ID_INVALID ' + bookId);
       return null;
@@ -292,7 +299,7 @@ export default {
   // 二次确认删除：第一次点击标记，第二次点击执行。
   // 内置书籍是构建期打进来的静态书单，不可从设备删除。
   askDelete(bookId) {
-    if (typeof bookId !== 'string' || !isLowerHex(bookId, 16)) {
+    if (!isValidBookId(bookId)) {
       this.status = '删除失败：参数无效（E_BOOK_ID_INVALID）';
       return;
     }

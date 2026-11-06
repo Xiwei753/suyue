@@ -188,8 +188,8 @@ const watchReceiver = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/wear/WearReceiver.js');
 assert.ok(watchReceiver.includes('progressSync.handleMessage') &&
   watchReceiver.indexOf('progressSync.handleMessage') <
-    watchReceiver.indexOf('receiver.onMessage(messageText)'),
-  'watch bridge must route progress before transfer receiver');
+    watchReceiver.indexOf('receiver.onMessage(message)'),
+  'watch bridge must route the parsed progress object before the transfer receiver');
 assert.equal((watchReceiver.match(/wearengine\.subscribeMsg\(/g) || []).length, 1,
   'watch must keep exactly one subscribeMsg');
 
@@ -221,8 +221,8 @@ const watchApp = read(
 assert.ok(watchReader.includes('getApp().data.wearBridge') &&
   watchIndex.includes('getApp().data.wearBridge') &&
   watchReader.includes("from '../../reader/PageLayout'") &&
-  watchIndex.includes('configureBooks(wear.bookCatalog)') &&
-  watchApp.includes("from './books/BookCatalog.g.js'") &&
+  watchIndex.includes('configureBooks(CATALOG)') &&
+  watchIndex.includes("from '../../books/BookCatalog.g.js'") &&
   watchApp.includes('bookStorage: {') &&
   watchApp.includes('progressStore: {') &&
   watchIndex.includes('wear.setProgressSync({') &&

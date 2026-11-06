@@ -49,6 +49,18 @@ function notifyReceiverStatus(message) {
   }
 }
 
+function notifyMessageCallbackError(error) {
+  if (error === 'json-syntax' || error === 'json-error') {
+    notifyReceiveStatus('收到非协议消息');
+  } else if (error === 'unsupported-version') {
+    notifyReceiveStatus('协议版本不支持');
+  } else if (error === 'not-string') {
+    notifyReceiveStatus('消息格式异常：message 不是字符串');
+  } else if (error === 'invalid-envelope') {
+    notifyReceiveStatus('协议消息格式无效');
+  }
+}
+
 export function getReceiveStatus() {
   try {
     const event = JSON.parse(latestReceiveStatus);
@@ -246,6 +258,48 @@ export function capturePeerDevice(data) {
   return '';
 }
 
+function handleRegisterCallback() {
+  subscribed = true;
+  receiveStarting = false;
+  console.info('subscribeMsg register ok: peer=' + PHONE_BUNDLE_NAME);
+  notifyReceiverStatus('注册回调：isRegister=true（可达性待验）');
+}
+
+function handleFileCallback(data) {
+  const ref = extractFileRef(data);
+  const summary = receiver && receiver.fileCallbackSummary ?
+    receiver.fileCallbackSummary(data, ref) : '文件回调: receiver=unavailable';
+  notifyReceiverStatus(summary);
+  if (!ref) {
+    notifyReceiveStatus('文件通道回调缺少文件路径字段');
+  } else {
+    receiveFile(ref.uri, ref.field);
+  }
+}
+
+function handleMessageCallback(data) {
+  if (!receiver || typeof receiver.inspectMessageCallback !== 'function') {
+    notifyReceiverStatus('消息回调: receiver=unavailable');
+    return;
+  }
+  const inspection = receiver.inspectMessageCallback(data);
+  notifyReceiverStatus('消息回调: ' + inspection.summary);
+  if (inspection.error) {
+    notifyMessageCallbackError(inspection.error);
+  } else {
+    routeMessage(inspection.message);
+  }
+}
+
+function handleSubscribeSuccess(data, isCurrentAttempt) {
+  if (!isCurrentAttempt()) return;
+  const idField = capturePeerDevice(data);
+  if (idField) console.info('peer deviceId via data.' + idField);
+  if (data && data.isRegister) return handleRegisterCallback();
+  if (data && data.isFileType) return handleFileCallback(data);
+  handleMessageCallback(data);
+}
+
 export function beginReceive(trigger) {
   if (!PHONE_APP_ID) {
     notifyReceiverStatus('接收器未配置：缺少手机 APP ID');
@@ -325,35 +379,8 @@ export function beginReceive(trigger) {
                 notifyReceiverStatus('阶段：手机 APP ID 已设置；注册消息接收');
                 subscribeAttempted = true;
                 wearengine.subscribeMsg({
-                  success: (data) => {
-                    if (!isCurrentAttempt()) return;
-                    // 先尽力取真实 deviceId，供回执使用；
-                    // 取到就记下命中的字段名，便于真机核对。
-                    const idField = capturePeerDevice(data);
-                    if (idField) {
-                      console.info('peer deviceId via data.' + idField);
-                    }
-                    if (data && data.isRegister) {
-                      subscribed = true;
-                      receiveStarting = false;
-                      console.info('subscribeMsg register ok: peer=' +
-                        PHONE_BUNDLE_NAME);
-                      notifyReceiverStatus('注册回调：isRegister=true（可达性待验）');
-                    } else if (data && data.isFileType) {
-                      // 文件通道到达（P0-2）：字段名
-                      // 以 GT4 Lite SDK 实测为准。候选
-                      // 字段逐一取值，取到后记录来源；
-                      // 全部缺失则不落盘、只报状态。
-                      const ref = extractFileRef(data);
-                      if (!ref) {
-                        notifyReceiveStatus('文件通道回调缺少文件路径字段');
-                      } else {
-                        receiveFile(ref.uri, ref.field);
-                      }
-                    } else if (data && typeof data.message === 'string') {
-                      routeMessage(data.message);
-                    }
-                  },
+                  success: (data) =>
+                    handleSubscribeSuccess(data, isCurrentAttempt),
                   fail: (reason, code) => {
                     if (!isCurrentAttempt()) return;
                     receiveStarting = false;
@@ -400,20 +427,19 @@ export function beginReceive(trigger) {
   }
 }
 
-function routeMessage(messageText) {
-  // 记录对端消息是否真正到达手表；类型解析失败也不阻断协议。
-  var type = 'unknown';
-  try {
-    type = JSON.parse(messageText).type || 'unknown';
-  } catch (e) {}
+function routeMessage(message) {
+  // subscribeMsg.success 已在唯一入口完成一次 JSON.parse；这里只传递
+  // 受 v/type 校验的对象，避免进度与传书接收器各自重复解析。
+  const type = receiver && receiver.safeProtocolType ?
+    receiver.safeProtocolType(message) : 'invalid';
   console.info('Wear message received type=' + type);
   // 阅读进度是独立小消息，不进入传书状态机；仍复用同一次
   // subscribeMsg 和同一个 sendToPhone 通道。
   if (progressSync && typeof progressSync.handleMessage === 'function' &&
-      progressSync.handleMessage(messageText, sendToPhoneImpl)) return;
+      progressSync.handleMessage(message, sendToPhoneImpl)) return;
   if (!receiver) return;
   // CHUNK/FINISH/RESUME 正文消息不受支持；正文只走文件通道。
-  receiver.onMessage(messageText);
+  receiver.onMessage(message);
 }
 
 // 文件通道回调字段提取（P0-2）：

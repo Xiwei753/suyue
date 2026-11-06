@@ -46,6 +46,7 @@ try {
     p.isLoading=true;
     p.saved=0;p.scheduleSave=()=>{p.saved++};
     p.savePreferences=()=>{};
+    p.readerStorage={saveLastBook(_bookId,done){done({ok:true})}};
     p.reloads=0;p.loadPage=()=>{p.reloads++};
     return p;
   }

@@ -52,6 +52,10 @@ try {
   p.progressReady = false;
   p.saving = false;
   p.progressError = '';
+  p.readerStorage = {
+    loadProgress: (id, callback) => progress.loadProgress(id, callback),
+    saveProgress: progress.saveProgress
+  };
   p.saveWanted = false;
   p.prefSaving = false;
   p.prefWanted = false;

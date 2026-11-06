@@ -343,14 +343,21 @@ function handleApply(message, sendToPhone) {
 }
 
 // WearReceiver 在交给传书接收器之前调用。
-export function handleMessage(text, sendToPhone) {
-  if (typeof text !== 'string' || typeof sendToPhone !== 'function') {
+export function handleMessage(input, sendToPhone) {
+  if (typeof sendToPhone !== 'function') {
     return false;
   }
   var message;
-  try {
-    message = JSON.parse(text);
-  } catch (e) {
+  if (typeof input === 'string') {
+    try {
+      message = JSON.parse(input);
+    } catch (e) {
+      return false;
+    }
+  } else if (input && typeof input === 'object' && !Array.isArray(input)) {
+    // WearReceiver 已在唯一消息入口解析过的对象直接复用。
+    message = input;
+  } else {
     return false;
   }
   if (!message || typeof message.type !== 'string' ||

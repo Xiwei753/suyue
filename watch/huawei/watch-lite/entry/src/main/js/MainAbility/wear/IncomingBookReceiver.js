@@ -10,6 +10,126 @@
 // 文件通道流式校验窗口（字节）。
 var VERIFY_WINDOW = 64 * 1024;
 
+function callbackValueType(value) {
+  if (value === undefined) return 'undefined';
+  if (value === null) return 'null';
+  if (typeof value !== 'object') return typeof value;
+  if (Array.isArray(value)) return 'Array';
+  const tag = Object.prototype.toString.call(value);
+  if (tag === '[object Uint8Array]') return 'Uint8Array';
+  if (tag === '[object ArrayBuffer]') return 'ArrayBuffer';
+  if (tag === '[object DataView]') return 'DataView';
+  return 'object';
+}
+
+function callbackValueLength(value) {
+  if (typeof value === 'string') return value.length;
+  if (!value || typeof value !== 'object') return null;
+  if (typeof value.length === 'number' && value.length >= 0) {
+    return value.length;
+  }
+  const type = callbackValueType(value);
+  if ((type === 'ArrayBuffer' || type === 'DataView') &&
+      typeof value.byteLength === 'number') return value.byteLength;
+  return null;
+}
+
+function callbackFlagValue(data, name) {
+  if (!data || typeof data !== 'object') return 'undefined';
+  const value = data[name];
+  if (value === undefined) return 'undefined';
+  if (value === null) return 'null';
+  if (typeof value === 'boolean') return 'boolean:' + value;
+  return typeof value;
+}
+
+function callbackElementCode(value, index) {
+  let code;
+  if (typeof value === 'string') code = value.charCodeAt(index);
+  else if (value && typeof value.length === 'number') code = value[index];
+  else return null;
+  return typeof code === 'number' && isFinite(code) &&
+    code >= 0 && code <= 65535 ? code : null;
+}
+
+function callbackEdgeCodes(value, length) {
+  if (length === null || length <= 6) return 'edge=short';
+  const first = [];
+  const last = [];
+  for (let i = 0; i < 3; i++) {
+    first.push(callbackElementCode(value, i));
+    last.push(callbackElementCode(value, length - 3 + i));
+  }
+  return 'edge=' + first.join(',') + '/' + last.join(',');
+}
+
+function safeProtocolType(message) {
+  if (!message || typeof message.type !== 'string') return 'invalid';
+  const known = ['HELLO', 'BOOK_META', 'CHAPTERS', 'ERROR', 'RESULT',
+    'READ_PROGRESS_GET', 'READ_PROGRESS_STATE', 'READ_PROGRESS_APPLY'];
+  return known.indexOf(message.type) >= 0 ? message.type : 'other';
+}
+
+function parseErrorPosition(error) {
+  const message = error && error.message;
+  if (typeof message !== 'string') return '';
+  const start = message.indexOf('position ');
+  if (start < 0) return '';
+  let position = '';
+  for (let i = start + 9; i < message.length; i++) {
+    const code = message.charCodeAt(i);
+    if (code < 48 || code > 57) break;
+    position += message.charAt(i);
+  }
+  return position;
+}
+
+function inspectMessageCallback(data) {
+  const text = data && typeof data === 'object' ? data.message : undefined;
+  const type = callbackValueType(text);
+  const length = callbackValueLength(text);
+  const inspection = { message: null, error: '', position: '', summary: '' };
+  if (typeof text !== 'string') {
+    inspection.error = 'not-string';
+  } else {
+    try {
+      inspection.message = JSON.parse(text);
+      const message = inspection.message;
+      if (!message || typeof message !== 'object' || Array.isArray(message) ||
+          typeof message.type !== 'string' || message.type.length === 0 ||
+          message.type.length > 64 ||
+          !Object.prototype.hasOwnProperty.call(message, 'v') ||
+          typeof message.v !== 'number') {
+        inspection.error = 'invalid-envelope';
+      } else if (message.v !== 0) {
+        inspection.error = 'unsupported-version';
+      }
+    } catch (error) {
+      inspection.error = error && error.name === 'SyntaxError' ?
+        'json-syntax' : 'json-error';
+      inspection.position = parseErrorPosition(error);
+    }
+  }
+  let json = inspection.error ? inspection.error :
+    'ok:' + safeProtocolType(inspection.message);
+  if (inspection.position) json += '@' + inspection.position;
+  inspection.summary = 'm=' + type + '/' +
+    (length === null ? 'na' : length) + ' ' +
+    callbackEdgeCodes(text, length) +
+    ' reg=' + callbackFlagValue(data, 'isRegister') +
+    ' file=' + callbackFlagValue(data, 'isFileType') + ' json=' + json;
+  return inspection;
+}
+
+function fileCallbackSummary(data, ref) {
+  const length = callbackValueLength(ref && ref.uri);
+  return '文件回调: file=' + (ref ? ref.field : 'missing') +
+    ' ref=' + callbackValueType(ref && ref.uri) + '/' +
+    (length === null ? 'na' : length) +
+    ' reg=' + callbackFlagValue(data, 'isRegister') +
+    ' file=' + callbackFlagValue(data, 'isFileType');
+}
+
 export function IncomingBookReceiver(onStatus, sendToPhone, options) {
   const config = options || {};
   const storage = config.storage || {};
@@ -38,6 +158,9 @@ export function IncomingBookReceiver(onStatus, sendToPhone, options) {
   const transfers = {};   // transferId → state
   const staleTimers = {}; // transferId → bounded cleanup timer
   const expiresAt = {};
+  this.inspectMessageCallback = inspectMessageCallback;
+  this.fileCallbackSummary = fileCallbackSummary;
+  this.safeProtocolType = safeProtocolType;
 
   // 当前在途 transferId（单本互斥，P0-2）。
   function activeTransferId() {
@@ -100,18 +223,36 @@ export function IncomingBookReceiver(onStatus, sendToPhone, options) {
   }
 
   // 控制消息入口。正文仅通过 receiveFileChannel 到达。
-  this.onMessage = function (messageText) {
+  this.onMessage = function (messageInput) {
     let message;
-    try {
-      message = JSON.parse(messageText);
-    } catch (e) {
-      return notify('收到非协议消息');
+    if (typeof messageInput === 'string') {
+      try {
+        message = JSON.parse(messageInput);
+      } catch (e) {
+        return notify('收到非协议消息');
+      }
+    } else if (messageInput && typeof messageInput === 'object' &&
+        !Array.isArray(messageInput)) {
+      // WearReceiver 已在 subscribeMsg 唯一入口解析过的对象直接复用。
+      message = messageInput;
+    } else {
+      return notify('协议消息格式无效');
+    }
+    if (!message || typeof message !== 'object' ||
+        Array.isArray(message) || typeof message.type !== 'string' ||
+        message.type.length === 0 || message.type.length > 64 ||
+        !Object.prototype.hasOwnProperty.call(message, 'v') ||
+        typeof message.v !== 'number') {
+      return notify('协议消息格式无效');
     }
     if (message.v !== 0) return notify('协议版本不支持');
     // A fresh user-initiated BOOK_META must not remain blocked by an old
     // transfer if a best-effort E_CANCELLED could not reach the watch.
     expireStaleTransfers();
     switch (message.type) {
+      case 'HELLO':
+        // 连接问候不改变传输状态，也不触发应用层回执。
+        break;
       case 'BOOK_META': {
         const existing = transfers[message.transferId];
         if (existing && existing.fileReceiving) {
