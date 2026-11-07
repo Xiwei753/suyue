@@ -1,0 +1,4 @@
+<div class="screen">
+  <text class="status">{{ status }}</text>
+  <text class="action" onclick="openStorage">进入本地存储</text>
+</div>

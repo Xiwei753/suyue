@@ -1,4 +1,7 @@
 <div class="screen">
-  <text class="status">{{ status }}</text>
-  <text class="retry" onclick="returnToShelf">返回书架</text>
+  <text class="status" if="{{ startupDiagnostic }}">{{ status }}</text>
+  <text class="retry" if="{{ canStartConnection }}" onclick="connectWear">手动触发 Wear 接收</text>
+  <text class="retry" if="{{ connectionStarted }}">{{ receiverStatus }}</text>
+  <text class="status" if="{{ normalMode }}">{{ status }}</text>
+  <text class="retry" if="{{ normalMode }}" onclick="returnToShelf">返回书架</text>
 </div>

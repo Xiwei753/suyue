@@ -11,11 +11,21 @@ cd "$REPO_ROOT/watch/huawei/watch-lite"
 
 MODE="${1:-debug}"   # debug | release
 PRODUCT="${PRODUCT:-default}"
+STARTUP_DIAGNOSTIC="${WATCH_STARTUP_DIAGNOSTIC:-0}"
 
 if [ "$MODE" != "debug" ] && [ "$MODE" != "release" ]; then
   echo "usage: $0 [debug|release]" >&2
   echo "       (optional) WATCH_BOOKS_DIR=/path/to/txt-dir $0 debug" >&2
+  echo "       (optional) WATCH_STARTUP_DIAGNOSTIC=1 $0 debug" >&2
   echo "       把选定 TXT 放进内置 rawfile 资源（JS 保持很小），见 issue #10。" >&2
+  exit 2
+fi
+if [ "$STARTUP_DIAGNOSTIC" != "0" ] && [ "$STARTUP_DIAGNOSTIC" != "1" ]; then
+  echo "ERROR: WATCH_STARTUP_DIAGNOSTIC must be 0 or 1." >&2
+  exit 2
+fi
+if [ "$STARTUP_DIAGNOSTIC" = "1" ] && [ "$MODE" != "debug" ]; then
+  echo "ERROR: startup diagnostic builds must use debug mode." >&2
   exit 2
 fi
 
@@ -113,6 +123,9 @@ PHONE_BUNDLE="com.xiwei.suyue"
 PHONE_APP_ID=""
 WATCH_CONFIG_BACKUP=""
 PHONE_PEER_BACKUP=""
+DIAGNOSTIC_BACKUP_DIR=""
+STARTUP_CONFIG_FILE="entry/src/main/js/MainAbility/StartupDiagnosticConfig.g.js"
+STARTUP_SOURCE_DIR="$REPO_ROOT/watch/huawei/watch-lite/startup-diagnostic"
 
 cleanup_books() {
   if [ -n "$BOOKS_BACKUP" ] && [ -d "$BOOKS_BACKUP" ]; then
@@ -137,11 +150,50 @@ cleanup_identity() {
   fi
 }
 
+cleanup_diagnostic_sources() {
+  if [ -n "$DIAGNOSTIC_BACKUP_DIR" ] && [ -d "$DIAGNOSTIC_BACKUP_DIR" ]; then
+    cp -f "$DIAGNOSTIC_BACKUP_DIR/StartupDiagnosticConfig.g.js" "$STARTUP_CONFIG_FILE"
+    cp -f "$DIAGNOSTIC_BACKUP_DIR/start.js" \
+      entry/src/main/js/MainAbility/pages/start/start.js
+    cp -f "$DIAGNOSTIC_BACKUP_DIR/start.hml" \
+      entry/src/main/js/MainAbility/pages/start/start.hml
+    cp -f "$DIAGNOSTIC_BACKUP_DIR/start.css" \
+      entry/src/main/js/MainAbility/pages/start/start.css
+    rm -rf "$DIAGNOSTIC_BACKUP_DIR"
+    DIAGNOSTIC_BACKUP_DIR=""
+  fi
+}
+
 cleanup_all() {
   cleanup_books
   cleanup_identity
+  cleanup_diagnostic_sources
 }
 trap cleanup_all EXIT
+
+if [ "$STARTUP_DIAGNOSTIC" = "1" ]; then
+  DIAGNOSTIC_BACKUP_DIR="$(mktemp -d)"
+  cp -f "$STARTUP_CONFIG_FILE" "$DIAGNOSTIC_BACKUP_DIR/StartupDiagnosticConfig.g.js"
+  cp -f entry/src/main/js/MainAbility/pages/start/start.js "$DIAGNOSTIC_BACKUP_DIR/start.js"
+  cp -f entry/src/main/js/MainAbility/pages/start/start.hml "$DIAGNOSTIC_BACKUP_DIR/start.hml"
+  cp -f entry/src/main/js/MainAbility/pages/start/start.css "$DIAGNOSTIC_BACKUP_DIR/start.css"
+  cp -f "$STARTUP_SOURCE_DIR/start.js" entry/src/main/js/MainAbility/pages/start/start.js
+  cp -f "$STARTUP_SOURCE_DIR/start.hml" entry/src/main/js/MainAbility/pages/start/start.hml
+  cp -f "$STARTUP_SOURCE_DIR/start.css" entry/src/main/js/MainAbility/pages/start/start.css
+  python3 - "$STARTUP_CONFIG_FILE" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding='utf-8')
+source = 'export const STARTUP_DIAGNOSTIC = false;'
+target = 'export const STARTUP_DIAGNOSTIC = true;'
+if text.count(source) != 1:
+    raise SystemExit('ERROR: startup diagnostic toggle source is not unique')
+path.write_text(text.replace(source, target, 1), encoding='utf-8')
+PY
+  echo "WATCH_STARTUP_DIAGNOSTIC=1"
+else
+  echo "WATCH_STARTUP_DIAGNOSTIC=0"
+fi
 
 if [ -n "${WATCH_BOOKS_DIR:-}" ]; then
   # 先备份提交的默认空书单：generator 会清空并重建目录，中途失败也要还原。

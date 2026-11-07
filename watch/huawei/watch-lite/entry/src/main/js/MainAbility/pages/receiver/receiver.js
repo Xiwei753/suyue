@@ -2,6 +2,7 @@
 // Loaded on demand after the metadata-only start route. It owns the single
 // Wear subscription and returns to the full bookshelf after setup.
 import router from '@system.router';
+import { STARTUP_DIAGNOSTIC } from '../../StartupDiagnosticConfig.g.js';
 import { beginReceive, stopReceive, reportAppLifecycle,
   getReceiveStatus, setReceiveStatusHandler, getReceiverStatus,
   setReceiverStatusHandler, onReceiverPageShow, onReceiverPageHide,
@@ -56,10 +57,33 @@ export default {
   data: {
     resume: '1',
     selectedBookId: '',
-    status: '正在准备阅读服务'
+    status: '正在准备阅读服务',
+    receiverStatus: '',
+    startupDiagnostic: STARTUP_DIAGNOSTIC,
+    normalMode: !STARTUP_DIAGNOSTIC,
+    connectionStarted: false,
+    canStartConnection: STARTUP_DIAGNOSTIC
   },
   onInit() {
+    if (STARTUP_DIAGNOSTIC) {
+      this.status = 'C: 接收器页面已显示；尚未连接';
+      return;
+    }
+    this.initializeReceiver(false);
+  },
+  connectWear() {
+    if (!STARTUP_DIAGNOSTIC || this.connectionStarted) return;
+    this.connectionStarted = true;
+    this.canStartConnection = false;
+    this.status = 'D: 正在初始化 Wear 接收';
+    setReceiverStatusHandler((message) => {
+      this.receiverStatus = String(message || '状态暂不可用').slice(0, 24);
+    });
+    this.initializeReceiver(true);
+  },
+  initializeReceiver(stayOnPage) {
     const app = appData();
+    var initializationFailed = false;
     try {
       if (!app || !app.readerStorage) {
         throw new Error('reader storage unavailable');
@@ -94,12 +118,18 @@ export default {
       app.wearRuntimeInitialized = true;
       this.status = '阅读服务已准备';
     } catch (error) {
+      initializationFailed = true;
       if (app) {
         app.receiverStatus = '接收器初始化失败';
         app.wearRuntimeInitialized = true;
       }
-      this.status = '阅读服务初始化失败';
+      this.status = STARTUP_DIAGNOSTIC ?
+        'D: Wear 接收初始化失败' : '阅读服务初始化失败';
       console.error('[suyue] E_WEAR_INIT ' + error);
+    }
+    if (stayOnPage) {
+      if (!initializationFailed) this.status = 'D: Wear 接收初始化已触发';
+      return;
     }
     this.returnToShelf();
   },
