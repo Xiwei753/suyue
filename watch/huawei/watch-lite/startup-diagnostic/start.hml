@@ -1,1 +1,1 @@
-<div><text>{{ status }}</text></div>
+<div class="screen"><text class="status">{{ status }}</text></div>

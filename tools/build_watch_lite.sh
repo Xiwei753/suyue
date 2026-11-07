@@ -156,6 +156,9 @@ PY
   cp -f "$STARTUP_SOURCE_DIR/start.js" entry/src/main/js/MainAbility/pages/start/start.js
   cp -f "$STARTUP_SOURCE_DIR/start.hml" entry/src/main/js/MainAbility/pages/start/start.hml
   cp -f "$STARTUP_SOURCE_DIR/start.css" entry/src/main/js/MainAbility/pages/start/start.css
+  python3 "$REPO_ROOT/tools/check_lite_diagnostic_ui.py" \
+    --hml entry/src/main/js/MainAbility/pages/start/start.hml \
+    --css entry/src/main/js/MainAbility/pages/start/start.css
   echo "WATCH_STARTUP_DIAGNOSTIC=1"
   echo "WATCH_DIAGNOSTIC_BUILD=1"
 else
@@ -330,6 +333,7 @@ build_inputs = [
     repo / 'tools' / 'sign_hap.sh',
     repo / 'tools' / 'check_lite_bin.py',
     repo / 'tools' / 'check_lite_page_payload.py',
+    repo / 'tools' / 'check_lite_diagnostic_ui.py',
     repo / 'tests' / 'build_artifact_check.sh',
 ]
 ignored_dirs = {'.git', '.hvigor', 'node_modules', 'build'}
