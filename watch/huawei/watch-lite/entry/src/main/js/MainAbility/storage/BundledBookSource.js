@@ -12,11 +12,13 @@
 // 每个文件调用都有有限超时（settle-once），任何一步不回调都不会
 // 让阅读页永久卡住。书单元数据来自 BookCatalog.g.js（不含正文）。
 import file from '@system.file';
+import { BOOKS } from '../books/BookCatalog.g.js';
+import { ROOT, complete } from './BookStorage.js';
 
 // rawfile 资源基路径（与构建期 resourceDir 一致）。
 var RAWFILE_DIR = 'internal://app/rawfile/gt4books/';
 // 私有缓存目录（复制出来的副本放这里，可窗口读）。
-var CACHE_DIR = 'internal://app/gt4reader/cache';
+var CACHE_DIR = ROOT + '/cache';
 
 var OP_TIMEOUT_MS = 6000;
 export function setBundledTimeout(ms) {
@@ -26,37 +28,20 @@ export function setBundledTimeout(ms) {
 // 元数据表：bookId -> {bookId,title,bytes,file}
 var META = {};
 var LIST = [];
+var i;
+for (i = 0; i < BOOKS.length; i++) {
+  var b = BOOKS[i];
+  META[b.bookId] = b;
+  LIST.push({
+    bookId: b.bookId,
+    title: b.title,
+    bytes: b.bytes,
+    chapters: b.chapters || [],
+    origin: 'builtin'
+  });
+}
+
 export var BUNDLED_BOOKS = LIST;
-
-function complete(cb, value) {
-  if (typeof cb === 'function') cb(value);
-}
-
-export function configureBooks(books) {
-  META = {};
-  LIST = [];
-  var entries = Array.isArray(books) ? books : [];
-  for (var i = 0; i < entries.length; i++) {
-    var row = entries[i];
-    var b = row;
-    if (Array.isArray(row)) {
-      b = { bookId: row[0], title: row[1], bytes: row[2], file: row[3],
-        sha256: row[4], chapters: row[5] || [] };
-    }
-    if (!b || typeof b.bookId !== 'string') continue;
-    META[b.bookId] = b;
-    LIST.push({
-      bookId: b.bookId,
-      title: b.title,
-      bytes: b.bytes,
-      sha256: b.sha256,
-      chapters: b.chapters || [],
-      origin: 'builtin'
-    });
-  }
-  BUNDLED_BOOKS = LIST;
-  return BUNDLED_BOOKS;
-}
 
 export function isBundled(bookId) {
   return Object.prototype.hasOwnProperty.call(META, bookId);
@@ -69,7 +54,6 @@ export function bundledEntry(bookId) {
     bookId: b.bookId,
     title: b.title,
     bytes: b.bytes,
-    sha256: b.sha256,
     chapters: b.chapters || [],
     origin: 'builtin'
   };

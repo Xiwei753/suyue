@@ -11,21 +11,11 @@ cd "$REPO_ROOT/watch/huawei/watch-lite"
 
 MODE="${1:-debug}"   # debug | release
 PRODUCT="${PRODUCT:-default}"
-STARTUP_DIAGNOSTIC="${WATCH_STARTUP_DIAGNOSTIC:-0}"
 
 if [ "$MODE" != "debug" ] && [ "$MODE" != "release" ]; then
   echo "usage: $0 [debug|release]" >&2
   echo "       (optional) WATCH_BOOKS_DIR=/path/to/txt-dir $0 debug" >&2
-  echo "       (optional) WATCH_STARTUP_DIAGNOSTIC=1 $0 debug" >&2
   echo "       把选定 TXT 放进内置 rawfile 资源（JS 保持很小），见 issue #10。" >&2
-  exit 2
-fi
-if [ "$STARTUP_DIAGNOSTIC" != "0" ] && [ "$STARTUP_DIAGNOSTIC" != "1" ]; then
-  echo "ERROR: WATCH_STARTUP_DIAGNOSTIC must be 0 or 1." >&2
-  exit 2
-fi
-if [ "$STARTUP_DIAGNOSTIC" = "1" ] && [ "$MODE" != "debug" ]; then
-  echo "ERROR: startup diagnostic builds must use debug mode." >&2
   exit 2
 fi
 
@@ -39,7 +29,7 @@ HVIGORW="$(command -v hvigorw || echo ./hvigorw)"
 
 # 此信息只证明本次构建选择了哪个源码版本；最终可安装性
 # 仍必须以签名 HAP/内层 BIN 检查及 GT4 真机安装结果为准。
-WATCH_SOURCE_COMMIT_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+WATCH_SOURCE_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
 WATCH_SOURCE_VERSION="$(python3 - "$REPO_ROOT/watch/huawei/watch-lite/entry/src/main/config.json" <<'PY'
 import json, sys
 with open(sys.argv[1], encoding='utf-8') as f:
@@ -47,7 +37,8 @@ with open(sys.argv[1], encoding='utf-8') as f:
 print(str(v['code']) + '/' + str(v['name']))
 PY
 )"
-echo "WATCH_BUILD_COMMIT_SHA=$WATCH_SOURCE_COMMIT_SHA"
+echo "WATCH_BUILD_SOURCE_SHA=$WATCH_SOURCE_SHA"
+echo "WATCH_BUILD_SOURCE_VERSION=$WATCH_SOURCE_VERSION"
 
 # 清理本次输出：不能从历史产物中
 # 捡到旧 HAP（施工单 P1-8）。
@@ -62,7 +53,6 @@ mkdir -p "$OUT_DIR"
 #   watch/huawei/watch-lite/entry/src/main/resources/rawfile/gt4books/<bookId>.txt
 # 并生成**仅元数据**的
 #   watch/huawei/watch-lite/entry/src/main/js/MainAbility/books/BookCatalog.g.js
-#   watch/huawei/watch-lite/entry/src/main/js/MainAbility/books/BookChapters.g.js
 # 正文不进 JS（避免巨型 reader.js）——那被证明与本机 GT4 安装失败
 # （错误 34）时间相关；设备侧 storage/BundledBookSource.js 按需窗口读
 # rawfile，必要时先 file.copy 到私有目录再读。
@@ -89,9 +79,6 @@ PHONE_BUNDLE="com.xiwei.suyue"
 PHONE_APP_ID=""
 WATCH_CONFIG_BACKUP=""
 PHONE_PEER_BACKUP=""
-DIAGNOSTIC_BACKUP_DIR=""
-STARTUP_CONFIG_FILE="entry/src/main/js/MainAbility/StartupDiagnosticConfig.g.js"
-STARTUP_SOURCE_DIR="$REPO_ROOT/watch/huawei/watch-lite/startup-diagnostic"
 
 cleanup_books() {
   if [ -n "$BOOKS_BACKUP" ] && [ -d "$BOOKS_BACKUP" ]; then
@@ -116,55 +103,11 @@ cleanup_identity() {
   fi
 }
 
-cleanup_diagnostic_sources() {
-  if [ -n "$DIAGNOSTIC_BACKUP_DIR" ] && [ -d "$DIAGNOSTIC_BACKUP_DIR" ]; then
-    cp -f "$DIAGNOSTIC_BACKUP_DIR/config.json" "$WATCH_CONFIG_FILE"
-    cp -f "$DIAGNOSTIC_BACKUP_DIR/start.js" \
-      entry/src/main/js/MainAbility/pages/start/start.js
-    cp -f "$DIAGNOSTIC_BACKUP_DIR/start.hml" \
-      entry/src/main/js/MainAbility/pages/start/start.hml
-    cp -f "$DIAGNOSTIC_BACKUP_DIR/start.css" \
-      entry/src/main/js/MainAbility/pages/start/start.css
-    rm -rf "$DIAGNOSTIC_BACKUP_DIR"
-    DIAGNOSTIC_BACKUP_DIR=""
-  fi
-}
-
 cleanup_all() {
   cleanup_books
   cleanup_identity
-  cleanup_diagnostic_sources
 }
 trap cleanup_all EXIT
-
-if [ "$STARTUP_DIAGNOSTIC" = "1" ]; then
-  DIAGNOSTIC_BACKUP_DIR="$(mktemp -d)"
-  cp -f "$WATCH_CONFIG_FILE" "$DIAGNOSTIC_BACKUP_DIR/config.json"
-  cp -f entry/src/main/js/MainAbility/pages/start/start.js "$DIAGNOSTIC_BACKUP_DIR/start.js"
-  cp -f entry/src/main/js/MainAbility/pages/start/start.hml "$DIAGNOSTIC_BACKUP_DIR/start.hml"
-  cp -f entry/src/main/js/MainAbility/pages/start/start.css "$DIAGNOSTIC_BACKUP_DIR/start.css"
-  python3 - "$WATCH_CONFIG_FILE" <<'PY'
-import json, pathlib, sys
-path = pathlib.Path(sys.argv[1])
-config = json.loads(path.read_text(encoding='utf-8'))
-modules = config.get('module', {}).get('js', [])
-if not modules:
-    raise SystemExit('ERROR: Lite config.json has no module.js page list')
-modules[0]['pages'] = ['pages/start/start']
-path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-PY
-  cp -f "$STARTUP_SOURCE_DIR/start.js" entry/src/main/js/MainAbility/pages/start/start.js
-  cp -f "$STARTUP_SOURCE_DIR/start.hml" entry/src/main/js/MainAbility/pages/start/start.hml
-  cp -f "$STARTUP_SOURCE_DIR/start.css" entry/src/main/js/MainAbility/pages/start/start.css
-  python3 "$REPO_ROOT/tools/check_lite_diagnostic_ui.py" \
-    --hml entry/src/main/js/MainAbility/pages/start/start.hml \
-    --css entry/src/main/js/MainAbility/pages/start/start.css
-  echo "WATCH_STARTUP_DIAGNOSTIC=1"
-  echo "WATCH_DIAGNOSTIC_BUILD=1"
-else
-  echo "WATCH_STARTUP_DIAGNOSTIC=0"
-  echo "WATCH_DIAGNOSTIC_BUILD=0"
-fi
 
 if [ -n "${WATCH_BOOKS_DIR:-}" ]; then
   # 先备份提交的默认空书单：generator 会清空并重建目录，中途失败也要还原。
@@ -293,76 +236,7 @@ if ! grep -Fq "$PHONE_BUNDLE:$PHONE_APP_ID" "$WATCH_CONFIG_FILE"; then
 fi
 echo "WATCH_PHONE_APP_ID_INJECTED=yes bundle=$PHONE_BUNDLE appid_prefix=${PHONE_APP_ID:0:4}…"
 
-mapfile -t MANIFEST_PAGES < <(python3 - "$WATCH_CONFIG_FILE" <<'PY'
-import json, sys
-with open(sys.argv[1], encoding='utf-8') as stream:
-    config = json.load(stream)
-modules = config.get('module', {}).get('js', [])
-if not modules or not isinstance(modules[0].get('pages'), list):
-    raise SystemExit('ERROR: Lite config.json has no usable module.js page list')
-for page in modules[0]['pages']:
-    if not isinstance(page, str) or not page:
-        raise SystemExit('ERROR: Lite config.json has an invalid page route')
-    print(page)
-PY
-)
-if [ "${#MANIFEST_PAGES[@]}" -eq 0 ]; then
-  echo "ERROR: Lite manifest does not declare any pages." >&2
-  exit 1
-fi
-if [ "$STARTUP_DIAGNOSTIC" = "1" ] && \
-   { [ "${#MANIFEST_PAGES[@]}" -ne 1 ] || [ "${MANIFEST_PAGES[0]}" != "pages/start/start" ]; }; then
-  echo "ERROR: minimal diagnostic manifest must contain only pages/start/start." >&2
-  exit 1
-fi
-BUILD_PAGES=(app "${MANIFEST_PAGES[@]}")
-
-WATCH_SOURCE_SHA="$(python3 - "$REPO_ROOT" <<'PY'
-import hashlib
-from pathlib import Path
-import sys
-
-repo = Path(sys.argv[1])
-root = repo / 'watch' / 'huawei' / 'watch-lite'
-build_inputs = [
-    repo / 'tools' / 'build_watch_lite.sh',
-    repo / 'tools' / 'generate_watch_book_modules.py',
-    repo / 'tools' / 'prepare_watch_books.py',
-    repo / 'tools' / 'inject_signing.py',
-    repo / 'tools' / 'peer_identity_formats.py',
-    repo / 'tools' / 'sign_hap.sh',
-    repo / 'tools' / 'check_lite_bin.py',
-    repo / 'tools' / 'check_lite_page_payload.py',
-    repo / 'tools' / 'check_lite_diagnostic_ui.py',
-    repo / 'tests' / 'build_artifact_check.sh',
-]
-ignored_dirs = {'.git', '.hvigor', 'node_modules', 'build'}
-digest = hashlib.sha256()
-paths = [p for p in root.rglob('*') if p.is_file() and
-         not any(part in ignored_dirs for part in p.relative_to(root).parts[:-1])]
-paths.extend(p for p in build_inputs if p.is_file())
-for path in sorted(paths):
-    relative = path.relative_to(repo).as_posix().encode('utf-8')
-    content = path.read_bytes()
-    digest.update(len(relative).to_bytes(8, 'big'))
-    digest.update(relative)
-    digest.update(len(content).to_bytes(8, 'big'))
-    digest.update(content)
-print(digest.hexdigest())
-PY
-)"
-echo "WATCH_BUILD_SOURCE_SHA=$WATCH_SOURCE_SHA"
-echo "WATCH_BUILD_SOURCE_VERSION=$WATCH_SOURCE_VERSION"
-
-HVIGOR_LOG=""
-if [ "$STARTUP_DIAGNOSTIC" = "1" ]; then
-  HVIGOR_LOG="$OUT_DIR/issue27-minimal-a-hvigor.log"
-  "$HVIGORW" --mode module -p product="$PRODUCT" -p buildMode="$MODE" assembleHap --no-daemon 2>&1 | tee "$HVIGOR_LOG"
-  echo "WATCH_DIAGNOSTIC_HVIGOR_LOG=$REPO_ROOT/watch/huawei/watch-lite/$HVIGOR_LOG"
-  grep -E 'COMPILE RESULT|BUILD SUCCESS|BUILD FAILED' "$HVIGOR_LOG" | tail -n 20 || true
-else
-  "$HVIGORW" --mode module -p product="$PRODUCT" -p buildMode="$MODE" assembleHap --no-daemon
-fi
+"$HVIGORW" --mode module -p product="$PRODUCT" -p buildMode="$MODE" assembleHap --no-daemon
 
 # 按请求的 buildMode 挑选：release
 # 构建不得验到 debug 产物。
@@ -381,110 +255,6 @@ if [ -z "$HAP" ]; then
   echo "       $OUT_DIR/" >&2
   exit 1
 fi
-
-# Debug preserves readable bundle formatting, which can put an otherwise
-# modular app over the GT4 per-entry JS budget. Minify the final page bundles,
-# regenerate their JerryScript snapshots, and then repack the Lite single BIN.
-# Release already emits minified page JS and snapshots; it uses the same BIN
-# repack path so books and snapshots share the installable Lite container.
-SDK_ROOT="${HARMONY_SDK_ROOT:-${OHOS_SDK_HOME:-}}"
-if [ -z "$SDK_ROOT" ]; then
-  for candidate in \
-    "$HOME/.harmony-cli/sdk/default/openharmony" \
-    "$HOME/command-line-tools/sdk/default/openharmony"; do
-    if [ -d "$candidate/js/build-tools/ace-loader" ]; then
-      SDK_ROOT="$candidate"
-      break
-    fi
-  done
-fi
-if [ -z "$SDK_ROOT" ]; then
-  echo "ERROR: cannot locate the HarmonyOS SDK for Lite bundle post-processing." >&2
-  exit 1
-fi
-TERSER="$SDK_ROOT/js/build-tools/ace-loader/node_modules/terser/bin/terser"
-JERRY_SNAPSHOT="$SDK_ROOT/js/build-tools/ace-loader/bin/jerry-snapshot"
-HAP_TO_BIN="$SDK_ROOT/js/build-tools/binary-tools/haptobin_tool.jar"
-for tool in "$TERSER" "$JERRY_SNAPSHOT" "$HAP_TO_BIN"; do
-  if [ ! -f "$tool" ]; then
-    echo "ERROR: required Lite post-processing tool not found: $tool" >&2
-    exit 1
-  fi
-done
-echo "WATCH_TERSER_SHA256=$(sha256sum "$TERSER" | awk '{print $1}')"
-echo "WATCH_JERRY_SNAPSHOT_SHA256=$(sha256sum "$JERRY_SNAPSHOT" | awk '{print $1}')"
-echo "WATCH_HAP_TO_BIN_SHA256=$(sha256sum "$HAP_TO_BIN" | awk '{print $1}')"
-
-LITE_SOURCE_DIR="$REPO_ROOT/watch/huawei/watch-lite/entry/build/default/intermediates/lite_source/default"
-PAGE_JS_DIR="$LITE_SOURCE_DIR/assets/js/MainAbility"
-for page in "${BUILD_PAGES[@]}"; do
-  if [ "$page" = "app" ]; then
-    js="$PAGE_JS_DIR/app.js"
-  else
-    js="$PAGE_JS_DIR/$page.js"
-  fi
-  bc="${js%.js}.bc"
-  if [ ! -s "$js" ]; then
-    echo "ERROR: Lite page bundle is missing: $js" >&2
-    exit 1
-  fi
-  if [ "$MODE" = "debug" ]; then
-    minified="$js.minified"
-    node "$TERSER" "$js" --compress --mangle --output "$minified"
-    mv "$minified" "$js"
-    "$JERRY_SNAPSHOT" generate -o "$bc" "$js"
-  fi
-  if [ ! -s "$bc" ]; then
-    echo "ERROR: Lite page snapshot is missing after build: $bc" >&2
-    exit 1
-  fi
-  page_size="$(stat -c%s "$js" 2>/dev/null || stat -f%z "$js")"
-  if [ "$page_size" -gt 49152 ]; then
-    echo "ERROR: Lite page JS exceeds 48 KiB: page=$page size=$page_size" >&2
-    exit 1
-  fi
-  echo "WATCH_PAGE_JS page=$page size=$page_size"
-  echo "WATCH_PAGE_SNAPSHOT page=$page size=$(stat -c%s "$bc" 2>/dev/null || stat -f%z "$bc")"
-done
-PAGE_CHECK_ARGS=()
-for page in "${MANIFEST_PAGES[@]}"; do
-  PAGE_CHECK_ARGS+=(--expected-page "$page")
-done
-
-# Repack the post-processed Lite source tree to one BIN. The hvigor release
-# target emits a multi-file HAP, while GT4/HDEA installs the signed single BIN.
-UNSIGNED_BIN="$OUT_DIR/entry-default-repacked.bin"
-java -Dfile.encoding=utf-8 -jar "$HAP_TO_BIN" \
-  --project-path "$LITE_SOURCE_DIR" --bin-path "$UNSIGNED_BIN"
-if [ ! -s "$UNSIGNED_BIN" ]; then
-  echo "ERROR: Lite single-BIN repack produced no output." >&2
-  exit 1
-fi
-PAGE_PAYLOAD_ARGS=(--bin "$UNSIGNED_BIN" "${PAGE_CHECK_ARGS[@]}")
-if [ "$STARTUP_DIAGNOSTIC" = "1" ]; then
-  PAGE_PAYLOAD_ARGS+=(--diagnostic-a)
-fi
-if ! python3 "$REPO_ROOT/tools/check_lite_page_payload.py" "${PAGE_PAYLOAD_ARGS[@]}"; then
-  echo "ERROR: repacked Lite BIN page payload does not match the manifest." >&2
-  exit 1
-fi
-python3 - "$UNSIGNED_BIN" "$OUT_DIR/entry-default-unsigned.hap" <<'PY'
-import os, sys, zipfile
-bin_path, hap_path = sys.argv[1:]
-part = hap_path + '.repacked'
-with zipfile.ZipFile(part, 'w', compression=zipfile.ZIP_STORED) as archive:
-    archive.write(bin_path, 'entry-default-unsigned.bin')
-with zipfile.ZipFile(part) as archive:
-    entries = archive.infolist()
-    if len(entries) != 1 or entries[0].filename != 'entry-default-unsigned.bin':
-        raise SystemExit('FAIL: repacked Lite HAP is not a single root BIN')
-    if archive.read(entries[0]) != open(bin_path, 'rb').read():
-        raise SystemExit('FAIL: repacked Lite HAP BIN differs from repack output')
-os.replace(part, hap_path)
-PY
-HAP="$OUT_DIR/entry-default-unsigned.hap"
-UNSIGNED=1
-echo "WATCH_LITE_SINGLE_BIN_REPACKED=yes sha256=$(sha256sum "$UNSIGNED_BIN" | awk '{print $1}')"
 
 echo "BUILT_UNSIGNED_HAP_PATH=$REPO_ROOT/watch/huawei/watch-lite/$HAP"
 
@@ -592,13 +362,7 @@ if [ -n "$SIGN_P12" ] || [ -n "$SIGN_CER" ] || [ -n "$SIGN_PROFILE" ]; then
   # （com.xiwei.suyue）去签**手表** HAP（con.xiwei.suyue.gt4），
   # hap-sign-tool 照样报 "Sign Hap success!"、verify-app 也报
   # Verify success，但设备按包名校验会拒绝安装——"签名成功"没有意义。
-  if [ "$STARTUP_DIAGNOSTIC" = "1" ]; then
-    DIAGNOSTIC_STAMP="$(date +%Y%m%d-%H%M%S)"
-    DIAGNOSTIC_HAP_BASENAME="issue27-minimal-a-${WATCH_SOURCE_SHA:0:12}-${DIAGNOSTIC_STAMP}-debug-signed.hap"
-    SIGNED_HAP="$OUT_DIR/$DIAGNOSTIC_HAP_BASENAME"
-  else
-    SIGNED_HAP="$OUT_DIR/entry-default-$MODE-signed.hap"
-  fi
+  SIGNED_HAP="$OUT_DIR/entry-default-$MODE-signed.hap"
   SIGN_HAP_LOG="$OUT_DIR/.sign_hap.log"
   set +e
   "$REPO_ROOT/tools/sign_hap.sh" \
@@ -628,10 +392,6 @@ if [ -n "$SIGN_P12" ] || [ -n "$SIGN_CER" ] || [ -n "$SIGN_PROFILE" ]; then
       VERIFY_STATE="unknown"
     fi
     echo "SIGNED_LITE_HAP_PATH=$REPO_ROOT/watch/huawei/watch-lite/$HAP"
-    if [ "$STARTUP_DIAGNOSTIC" = "1" ]; then
-      find "$OUT_DIR" -maxdepth 1 -type f -name '*.hap' ! -path "$SIGNED_HAP" -delete
-      echo "WATCH_DIAGNOSTIC_HAP_PATH=$REPO_ROOT/watch/huawei/watch-lite/$SIGNED_HAP"
-    fi
   elif [ "$SIGN_STATUS" = "3" ]; then
     cat >&2 <<'MSG'
 
@@ -647,11 +407,6 @@ MSG
   else
     exit "$SIGN_STATUS"
   fi
-fi
-
-if [ "$STARTUP_DIAGNOSTIC" = "1" ] && [ "$UNSIGNED" = "1" ]; then
-  echo "ERROR: minimal diagnostic build requires a signed watch HAP; no package was staged." >&2
-  exit 1
 fi
 
 ARTIFACT_CHECK_ARGS=(
@@ -673,12 +428,6 @@ if [ -n "$BOOKS_REPORT" ]; then
   ARTIFACT_CHECK_ARGS+=(--expect-books-report "$BOOKS_REPORT")
 fi
 "$REPO_ROOT/tests/build_artifact_check.sh" "${ARTIFACT_CHECK_ARGS[@]}"
-
-if [ "$STARTUP_DIAGNOSTIC" = "1" ]; then
-  python3 "$REPO_ROOT/tools/check_lite_page_payload.py" \
-    --hap "$REPO_ROOT/watch/huawei/watch-lite/$HAP" \
-    "${PAGE_CHECK_ARGS[@]}" --diagnostic-a
-fi
 
 # source-manifest 检查只能证明注入源码正确；这里再核对**最终 HAP 的内层
 # BIN**，确认真实签进包里的 supportLists/APP ID 不是旧值或空值。
@@ -706,6 +455,16 @@ fi
 
 # 单页最终 JS 大小：用于证明「没有巨型 reader.js」（issue #10 复核）。
 # 正文应在 rawfile 资源里，页面 JS 只带书单元数据。
+PAGE_JS_DIR="$REPO_ROOT/watch/huawei/watch-lite/entry/build/default/intermediates/lite_source/default/assets/js/MainAbility"
+if [ -d "$PAGE_JS_DIR" ]; then
+  for page in index/index reader/reader; do
+    js="$PAGE_JS_DIR/pages/$page.js"
+    if [ -f "$js" ]; then
+      echo "WATCH_PAGE_JS page=$page size=$(stat -c%s "$js" 2>/dev/null || stat -f%z "$js")"
+    fi
+  done
+fi
+
 if [ "$UNSIGNED" = "0" ]; then
   BIN_BUNDLE="$(python3 "$REPO_ROOT/tools/check_lite_bin.py" \
       --hap "$REPO_ROOT/watch/huawei/watch-lite/$HAP" --bundle 'con.xiwei.suyue.gt4' 2>/dev/null \

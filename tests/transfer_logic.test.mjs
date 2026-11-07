@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Run: node --experimental-default-type=module tests/transfer_logic.test.mjs
-// 手表接收纯逻辑：BOOK_META、章节目录分片、文件通道摘要校验。
+// 手表接收纯逻辑与协议测试互验：
+//   - BOOK_META 字段校验（缺字段/错误编码/错误摘要格式）
+//   - 块按序、幂等、offset 连续性
+//   - 缺块 E_MISSING_CHUNKS、摘要异常 E_DIGEST_MISMATCH
+//   - 跨多字节 UTF-8 边界的字节级拼接
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
@@ -42,8 +46,9 @@ const load = async (rel) => {
   return mod;
 };
 
-const { validateBookMeta, beginTransfer, applyChapterChunk,
-  assembleChapters, missingChapterIndices, createDigestVerifier } =
+const { validateBookMeta, beginTransfer, applyChunk,
+  applyChapterChunk, assembleChapters,
+  missingIndices, assembleBytes, verifyDigest } =
   await load('wear/TransferLogic.js');
 
 const enc = new TextEncoder();
@@ -73,8 +78,6 @@ function makeMeta() {
 // ---------- BOOK_META 校验 ----------
 const meta = makeMeta();
 assert.equal(validateBookMeta(meta).ok, true);
-assert.equal(validateBookMeta({ ...meta, chapters: undefined }).ok, true,
-  'chapter directory is optional to the body metadata');
 for (const broken of [
   { ...meta, v: 1 },
   { ...meta, bookId: 'XYZ' },
@@ -83,34 +86,125 @@ for (const broken of [
   { ...meta, chunks: 0 },
   { ...meta, bytes: -1 },
   { ...meta, title: 123 },
+  { ...meta, chapters: null },
   { ...meta, transferId: '' }
 ]) {
   assert.equal(validateBookMeta(broken).ok, false,
     'must reject broken meta: ' + JSON.stringify(broken).substring(0, 60));
 }
 
-// ---------- 文件通道流式摘要校验 ----------
+// ---------- 正常按序接收 ----------
 {
-  const verifier = createDigestVerifier(meta.sha256);
-  for (let offset = 0; offset < bookBytes.length; offset += chunkSize) {
-    verifier.update(bookBytes.subarray(offset,
-      Math.min(offset + chunkSize, bookBytes.length)));
+  const started = beginTransfer(meta);
+  assert.equal(started.ok, true);
+  const state = started.state;
+  let offset = 0;
+  let index = 0;
+  while (offset < bookBytes.length) {
+    const end = Math.min(offset + chunkSize, bookBytes.length);
+    const payload = bookBytes.subarray(offset, end);
+    const applied = applyChunk(state, {
+      transferId: meta.transferId,
+      bookId: meta.bookId,
+      index: index,
+      total: meta.chunks,
+      offset: offset,
+      length: payload.length
+    }, payload);
+    assert.equal(applied.ok, true);
+    // 重复块：幂等
+    const again = applyChunk(state, {
+      transferId: meta.transferId,
+      bookId: meta.bookId,
+      index: index,
+      total: meta.chunks,
+      offset: offset,
+      length: payload.length
+    }, payload);
+    assert.equal(again.ok, true);
+    assert.equal(again.duplicate, true);
+    offset = end;
+    index += 1;
   }
-  assert.deepEqual(verifier.finish(bookBytes.length), { ok: true });
+  assert.deepEqual(missingIndices(state), []);
+  const assembled = assembleBytes(state);
+  assert.equal(assembled.ok, true);
+  assert.deepEqual(Buffer.from(assembled.bytes),
+    Buffer.from(bookBytes));
+  assert.equal(new TextDecoder().decode(assembled.bytes), bookText);
+  assert.equal(verifyDigest(assembled.bytes, meta.sha256), true);
 }
+
+// ---------- 缺块 ----------
 {
-  const verifier = createDigestVerifier('00'.repeat(32));
-  verifier.update(bookBytes);
-  assert.deepEqual(verifier.finish(bookBytes.length), {
-    ok: false, reason: 'E_DIGEST_MISMATCH'
-  });
+  const state = beginTransfer(meta).state;
+  let offset = 0;
+  let index = 0;
+  while (offset < bookBytes.length) {
+    const end = Math.min(offset + chunkSize, bookBytes.length);
+    if (index !== Math.floor(meta.chunks / 2)) {
+      const payload = bookBytes.subarray(offset, end);
+      applyChunk(state, {
+        transferId: meta.transferId,
+        bookId: meta.bookId,
+        index: index,
+        total: meta.chunks,
+        offset: offset,
+        length: payload.length
+      }, payload);
+    }
+    offset = end;
+    index += 1;
+  }
+  assert.ok(missingIndices(state).length > 0);
+  assert.equal(assembleBytes(state).reason, 'E_MISSING_CHUNKS');
 }
+
+// ---------- offset 不连续 → E_PROTOCOL ----------
 {
-  const verifier = createDigestVerifier(meta.sha256);
-  verifier.update(bookBytes);
-  assert.deepEqual(verifier.finish(bookBytes.length + 1), {
-    ok: false, reason: 'E_SIZE_MISMATCH'
-  });
+  const state = beginTransfer(meta).state;
+  const payload = bookBytes.subarray(0, chunkSize);
+  // 第二块直接跳到 offset = chunkSize*3（跳过中间）
+  const bad = applyChunk(state, {
+    transferId: meta.transferId,
+    bookId: meta.bookId,
+    index: 1,
+    total: meta.chunks,
+    offset: chunkSize * 3,
+    length: chunkSize
+  }, payload);
+  assert.equal(bad.ok, false);
+  assert.equal(bad.reason, 'E_PROTOCOL');
+}
+
+// ---------- 摘要异常 ----------
+{
+  const state = beginTransfer(meta).state;
+  let offset = 0;
+  let index = 0;
+  while (offset < bookBytes.length) {
+    const end = Math.min(offset + chunkSize, bookBytes.length);
+    let payload = bookBytes.subarray(offset, end);
+    if (index === 0) {
+      const flipped = new Uint8Array(payload);
+      flipped[0] ^= 0xff;
+      payload = flipped;
+    }
+    applyChunk(state, {
+      transferId: meta.transferId,
+      bookId: meta.bookId,
+      index: index,
+      total: meta.chunks,
+      offset: offset,
+      length: payload.length
+    }, payload);
+    offset = end;
+    index += 1;
+  }
+  const assembled = assembleBytes(state);
+  assert.equal(assembled.ok, true);
+  assert.equal(verifyDigest(assembled.bytes, meta.sha256), false,
+    'flipped byte must fail digest');
 }
 
 // ---------- 长章节目录 CHAPTERS 分片 ----------
@@ -145,8 +239,7 @@ for (const broken of [
   assert.equal(assembledChapters.ok, true);
   assert.deepEqual(assembledChapters.chapters.map((c) => c.title),
     ['第一章', '第二章', '第三章']);
-  assert.equal(state.meta.chapters.length, 0,
-    'assembled chunks are returned as one complete catalog without mutating BOOK_META');
+  assert.equal(state.meta.chapters.length, 3);
 }
 {
   const chunkedMeta = Object.assign({}, makeMeta(), {
@@ -159,21 +252,16 @@ for (const broken of [
     chapters: [{ title: '第一章', offset: 0, length: 10 }]
   });
   assert.equal(assembleChapters(state).reason, 'E_MISSING_CHAPTERS');
-  assert.deepEqual(missingChapterIndices(state), [1],
-    'missing catalog indexes must be available for diagnostics');
   assert.equal(applyChapterChunk(state, {
     transferId: chunkedMeta.transferId, bookId: chunkedMeta.bookId,
     index: 2, total: 2,
     chapters: [{ title: '越界', offset: 0, length: 1 }]
   }).reason, 'E_PROTOCOL');
-  const malformedCatalog = beginTransfer(Object.assign({}, chunkedMeta, {
+  assert.equal(validateBookMeta(Object.assign({}, chunkedMeta, {
     chapters: [{ title: '正文', offset: 0, length: 1 }]
-  })).state;
-  assert.equal(malformedCatalog.chapterCatalogInvalid, true,
-    'malformed optional catalog data must be discarded without rejecting body metadata');
-  assert.deepEqual(assembleChapters(malformedCatalog),
-    { ok: false, reason: 'E_PROTOCOL' });
+  })).ok, false,
+  'chunked BOOK_META must not also carry a full chapter array');
 }
 
-console.info('PASS: watch transfer logic (meta validation, streaming digest, ' +
-  'chapter chunks)');
+console.info('PASS: watch transfer logic (meta validation, ' +
+  'ordering, idempotency, missing/digest failures, chapter chunks)');

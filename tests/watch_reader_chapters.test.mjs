@@ -5,8 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeSystemFileStub } from './helpers/system_file_stub.mjs';
-import { createWatchLoader, writeWearEngineStub,
-  writeRouterStub, writeStorageStub }
+import { createWatchLoader, writeRouterStub, writeStorageStub }
   from './helpers/watch_module_loader.mjs';
 
 const tmp = mkdtempSync(join(tmpdir(), 'suyue-rchapters-'));
@@ -14,7 +13,6 @@ const disk = mkdtempSync(join(tmpdir(), 'suyue-rchapters-fs-'));
 try {
   const load = createWatchLoader({ tmpDir: tmp,
     stubPath: writeSystemFileStub(tmp, disk),
-    wearengineStubPath: writeWearEngineStub(tmp),
     routerStubPath: writeRouterStub(tmp),
     storageStubPath: writeStorageStub(tmp) });
   const mod = await load('pages/reader/reader.js');
@@ -75,8 +73,8 @@ try {
   assert.equal(plain.settingsOpen, false,
     'single/no-chapter books keep the old settings flow');
 
-  // issue #27 review：65 章 TXT 可完整打开目录并跳转到末章；
-  // 仅浏览完整目录不产生 loadPage。
+  // issue #17 review：100 章时从第 1 章打开面板，必须能独立翻组到
+  // 第 80 章附近并在点击后才跳转；翻组本身不产生 loadPage。
   const many = Object.create(mod.default);
   Object.assign(many, mod.default.data);
   many.offset = 0;
@@ -85,22 +83,27 @@ try {
   many.loadPage = function (offset, previous) {
     this.calls.push([offset, previous]);
   };
-  const list = Array.from({ length: 65 }, (_, i) => ({
+  const list = Array.from({ length: 100 }, (_, i) => ({
     title: '第' + (i + 1) + '章', offset: i * 10, length: 10
   }));
-  many.setChapters({ bytes: 650, chapters: list });
+  many.setChapters({ bytes: 1000, chapters: list });
   many.openChapters();
-  assert.equal(many.chapterRows.length, 65,
-    'full chapter list must be available for native scrolling');
-  assert.equal(many.chapterRows[64].title, '第65章');
-  assert.equal(many.calls.length, 0,
-    'opening the full list must not jump or load a page');
-  many.jumpChapter(64);
-  assert.deepEqual(many.calls[0], [640, 0],
-    'clicking chapter 65 must jump to its byte offset');
+  assert.equal(many.chapterRows.length, 5);
+  let pages = 0;
+  while (!many.chapterRows.some((row) => row.index === 79) && pages < 30) {
+    many.chapterWindowNext();
+    pages += 1;
+  }
+  assert.ok(pages > 0 && pages < 30,
+    'browse window must reach chapter 80 without changing reading position');
+  assert.equal(many.calls.length, 0, 'browsing must not jump or load a page');
+  assert.equal(many.chapterRows.length, 5, 'only a small window is rendered');
+  many.jumpChapter(79);
+  assert.deepEqual(many.calls[0], [790, 0],
+    'clicking chapter 80 must jump to its byte offset');
   assert.equal(many.settingsOpen, false);
 
-  console.info('PASS: 完整章节列表使用字节偏移跳转且不重开旧书 UI（issue #27）');
+  console.info('PASS: 章节面板跳转使用字节偏移、可翻组到第 80 章且不重开旧书 UI（issue #17）');
 } finally {
   rmSync(tmp, { recursive: true, force: true });
   rmSync(disk, { recursive: true, force: true });

@@ -1,201 +1,73 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// 完整书架（issue #10）：只由轻量启动书架按需进入。
+// 书架页（issue #10）：**开机即书架**。
 //
 // 设计：内置书单在构建期生成（books/BookCatalog.g.js，仅元数据），
-// onInit 里先同步显示内置书目，再初始化文件和通信服务。外部（手机
-// 传书）书目作为独立来源在后台合并；初始化失败时保留书架页面。
+// onInit 里**同步**取出并渲染，不等待任何文件接口 / 队列 / 导入 /
+// 权限 / 探测。外部（手机传书）书目作为**独立第二来源**在后台异步
+// 合并；它失败、超时或不存在，都不会让内置书架失效或卡住启动。
 //
-// 关键：本页只负责完整书架；冷启动的 pages/start/start 不加载本页依赖。
-// 小说正文按需读取（issue #10）。
+// 关键：本页**只** import BookCatalog（元数据），正文数据在阅读页
+// 才被 import，因此书架 bundle 不含正文（issue #10 内存要求）。
 import router from '@system.router';
 import { BOOKS as CATALOG } from '../../books/BookCatalog.g.js';
+import { ensureDirs, bookPath,
+  deleteBook } from '../../storage/BookStorage';
+import { listBooks, removeBook } from '../../storage/LibraryIndex';
+import { loadLastBook } from '../../storage/ProgressStore';
+import { beginReceive, stopReceive } from '../../wear/WearReceiver';
 import { isLowerHex } from '../../util/Validate';
-
-function appData() {
-  if (typeof getApp !== 'function') return null;
-  try {
-    const app = getApp();
-    return app && app.data && typeof app.data === 'object' ? app.data : null;
-  } catch (error) {
-    return null;
-  }
-}
-
-function wearBridge() {
-  const data = appData();
-  return data && data.wearBridge ? data.wearBridge : null;
-}
-
-function isValidBookId(bookId) {
-  return typeof bookId === 'string' && isLowerHex(bookId, 16);
-}
-
-function catalogBooks() {
-  var books = [];
-  for (var i = 0; i < CATALOG.length; i++) {
-    var row = CATALOG[i];
-    if (Array.isArray(row)) {
-      books.push({ bookId: row[0], title: row[1], bytes: row[2],
-        chapters: [], origin: 'builtin' });
-    } else if (row && typeof row.bookId === 'string') {
-      books.push({ bookId: row.bookId, title: row.title,
-        bytes: row.bytes, chapters: row.chapters || [], origin: 'builtin' });
-    }
-  }
-  return books;
-}
 
 export default {
   data: {
     title: '素阅',
     books: [],
     status: '书架就绪',
-    transferStatus: '',
-    receiverStatus: '接收器：尚未启动',
+    transferStatus: '传书未配置',
     confirmId: '',
-    selectedBookId: '',
     // 从阅读页显式返回时传 resume=0，避免又自动打开同一本书。
     resume: '1'
   },
   onInit() {
-    // This route stays small and displays metadata before runtime setup.
+    // 1) 同步渲染内置书单：这一句之后书架已经可用。
     this.token = (this.token || 0) + 1;
-    this.runtimeReady = false;
-    this.hasShownShelf = false;
     this.external = [];
-    this.resumeWanted = this.resume !== '0' && !this.selectedBookId;
+    this.resumeWanted = this.resume !== '0';
     this.resumeLoaded = false;
     this.resumeDone = false;
     this.externalLoaded = false;
     this.lastBookId = '';
-    this.bundledBooks = catalogBooks();
     this.refreshShelf();
-
-    const app = appData();
-    if (!app) {
-      this.status = '阅读服务尚未就绪';
-      return;
-    }
-
-    // Storage and receiver bundles load only after this screen is selected.
-    if (!app.storageRuntimeInitialized) {
-      try {
-        router.replace({ uri: 'pages/storage/storage', params: {
-          resume: this.resume,
-          selectedBookId: this.selectedBookId || ''
-        } });
-        return;
-      } catch (error) {
-        this.status = '阅读服务初始化失败';
-        console.error('[suyue] E_STORAGE_ROUTE ' + error);
-        return;
-      }
-    }
-
-    this.readerStorage = app.readerStorage || null;
-    if (!this.readerStorage) {
-      this.receiverStatus = app.storageRuntimeError || '阅读存储不可用';
-      this.status = '书架已显示；阅读服务未就绪';
-      return;
-    }
-    this.bookStorage = {
-      ensureDirs: this.readerStorage.ensureDirs,
-      deleteBook: this.readerStorage.deleteBook
-    };
-    this.libraryIndex = {
-      listBooks: this.readerStorage.listBooks,
-      removeBook: this.readerStorage.removeBook
-    };
-    this.progressStore = {
-      loadLastBook: this.readerStorage.loadLastBook,
-      clearProgress: this.readerStorage.clearProgress
-    };
-    this.runtimeReady = true;
-
-    if (!app.wearRuntimeInitialized) {
-      try {
-        router.replace({ uri: 'pages/receiver/receiver', params: {
-          resume: this.resume,
-          selectedBookId: this.selectedBookId || ''
-        } });
-        return;
-      } catch (error) {
-        app.receiverStatus = '接收器初始化失败';
-        console.error('[suyue] E_WEAR_ROUTE ' + error);
-      }
-    }
-
-    const wear = wearBridge();
-    if (wear) {
-      try {
-        this.transferStatus = wear.getReceiveStatus();
-        this.receiverStatus = wear.getReceiverStatus();
-        wear.setReceiveStatusHandler((message) => {
-          this.handleReceiveStatus(message);
-        });
-        wear.setReceiverStatusHandler((message) => {
-          this.receiverStatus = message;
-        });
-      } catch (error) {
-        this.receiverStatus = '接收器初始化失败';
-        console.error('[suyue] E_WEAR_STATUS ' + error);
-      }
-    } else {
-      this.receiverStatus = app.receiverStatus || '接收器未启动';
-    }
-
-    this.refreshShelf();
+    // 2) 后台合入外部（手机传书）书目，绝不阻塞上面的书架。
     this.loadExternal();
-    if (this.selectedBookId) {
-      const selectedBookId = this.selectedBookId;
-      this.selectedBookId = '';
-      this.openBook(selectedBookId);
-    } else {
-      this.loadResume();
+    // 3) 上次阅读记录也异步读取；书架先显示，绝不永久等待。
+    this.loadResume();
+    // 4) 传书接收与书架彼此独立：初始化异常不能拖垮离线书架。
+    try {
+      beginReceive((message) => {
+        this.handleReceiveStatus(message);
+      });
+    } catch (error) {
+      this.transferStatus = '传书初始化异常';
+      console.error('[suyue] E_WEAR_INIT ' + error);
     }
   },
   // 从阅读页返回时刷新外部书目（内置书单固定）。
   onShow() {
-    const wear = wearBridge();
-    if (wear && typeof wear.onReceiverPageShow === 'function') {
-      wear.onReceiverPageShow('pages/index/index');
-    }
-    // onShow can run on an index instance that is about to route through
-    // storage/receiver. Do not turn that early lifecycle into a false
-    // completed external-library load.
-    if (!this.runtimeReady) return;
-    if (!this.hasShownShelf) {
-      this.hasShownShelf = true;
-      return;
-    }
     this.loadExternal();
     this.tryAutoResume();
   },
-  onHide() {
-    const wear = wearBridge();
-    if (wear && typeof wear.onReceiverPageHide === 'function') {
-      wear.onReceiverPageHide();
-    }
-  },
   onDestroy() {
-    const wear = wearBridge();
-    if (wear && typeof wear.setReceiveStatusHandler === 'function') {
-      wear.setReceiveStatusHandler(null);
-    }
-    if (wear && typeof wear.setReceiverStatusHandler === 'function') {
-      wear.setReceiverStatusHandler(null);
-    }
+    stopReceive();
   },
   // 内置书单（同步）：只做一次轻量拷贝，带上 origin。
   bundledList() {
     var out = [];
-    var catalog = this.bundledBooks || [];
-    for (var i = 0; i < catalog.length; i++) {
+    for (var i = 0; i < CATALOG.length; i++) {
       out.push({
-        bookId: catalog[i].bookId,
-        title: catalog[i].title,
-        bytes: catalog[i].bytes,
-        chapters: catalog[i].chapters || [],
+        bookId: CATALOG[i].bookId,
+        title: CATALOG[i].title,
+        bytes: CATALOG[i].bytes,
+        chapters: CATALOG[i].chapters || [],
         origin: 'builtin'
       });
     }
@@ -221,10 +93,9 @@ export default {
   },
   // 后台加载外部书目。任何失败都只记录，不影响内置书架。
   loadExternal() {
-    if (!this.runtimeReady || !this.bookStorage || !this.libraryIndex) return;
     const token = this.token;
     try {
-      this.bookStorage.ensureDirs((dirs) => {
+      ensureDirs((dirs) => {
         if (token !== this.token) return;
         if (!dirs.ok) {
           console.error('[suyue] E_EXTERNAL_DIRS ' +
@@ -234,7 +105,7 @@ export default {
           return;
         }
         try {
-          this.libraryIndex.listBooks((books) => {
+          listBooks((books) => {
             if (token !== this.token) return;
             this.external = books;
             this.externalLoaded = true;
@@ -255,9 +126,8 @@ export default {
   },
   // 冷启动续读：只读一个轻量 bookId；书架已经先渲染，存储失败也不阻塞。
   loadResume() {
-    if (!this.runtimeReady || !this.progressStore) return;
     try {
-      this.progressStore.loadLastBook((state) => {
+      loadLastBook((state) => {
         this.resumeLoaded = true;
         if (state && state.ok && state.bookId) {
           this.lastBookId = state.bookId;
@@ -270,8 +140,7 @@ export default {
     }
   },
   tryAutoResume() {
-    if (!this.runtimeReady || !this.resumeWanted || this.resumeDone ||
-        !this.resumeLoaded) return;
+    if (!this.resumeWanted || this.resumeDone || !this.resumeLoaded) return;
     if (!this.lastBookId) {
       if (this.externalLoaded) this.resumeDone = true;
       return;
@@ -313,7 +182,7 @@ export default {
   },
   // 查找当前书架里指定的书（bookId 必须是 16 位小写十六进制）。
   findBook(bookId) {
-    if (!isValidBookId(bookId)) {
+    if (typeof bookId !== 'string' || !isLowerHex(bookId, 16)) {
       this.status = '打开失败：参数无效（E_BOOK_ID_INVALID）';
       console.error('[suyue] E_BOOK_ID_INVALID ' + bookId);
       return null;
@@ -330,21 +199,14 @@ export default {
   openBook(bookId) {
     const book = this.findBook(bookId);
     if (!book) return;
-    const wear = wearBridge();
     this.resumeDone = true;
     this.status = '正在打开《' + book.title + '》';
-    if (wear && typeof wear.markPageNavigation === 'function') {
-      wear.markPageNavigation('pages/reader/reader');
-    }
     try {
       router.replace({
         uri: 'pages/reader/reader',
         params: { bookId: book.bookId }
       });
     } catch (error) {
-      if (wear && typeof wear.clearPageNavigation === 'function') {
-        wear.clearPageNavigation();
-      }
       this.status = '打开失败：路由异常（E_ROUTE_UNSUPPORTED）';
       console.error('[suyue] E_ROUTE_UNSUPPORTED ' + error);
     }
@@ -352,7 +214,7 @@ export default {
   // 二次确认删除：第一次点击标记，第二次点击执行。
   // 内置书籍是构建期打进来的静态书单，不可从设备删除。
   askDelete(bookId) {
-    if (!isValidBookId(bookId)) {
+    if (typeof bookId !== 'string' || !isLowerHex(bookId, 16)) {
       this.status = '删除失败：参数无效（E_BOOK_ID_INVALID）';
       return;
     }
@@ -362,10 +224,6 @@ export default {
     }
     if (!book) {
       this.status = '删除失败：未找到该书（E_BOOK_MISSING）';
-      return;
-    }
-    if (!this.libraryIndex || !this.bookStorage) {
-      this.status = '删除失败：阅读服务未就绪';
       return;
     }
     if (book.origin === 'builtin') {
@@ -379,13 +237,11 @@ export default {
       return;
     }
     this.confirmId = '';
-    this.bookStorage.deleteBook(book.bookId, (state) => {
+    deleteBook(book.bookId, (state) => {
       if (state.ok) {
-        this.progressStore.clearProgress(book.bookId, () => {
-          this.libraryIndex.removeBook(book.bookId, () => {
-            this.status = '已删除《' + book.title + '》';
-            this.loadExternal();
-          });
+        removeBook(book.bookId, () => {
+          this.status = '已删除《' + book.title + '》';
+          this.loadExternal();
         });
       } else {
         this.status = '删除失败：' + state.reason;

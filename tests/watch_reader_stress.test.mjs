@@ -9,8 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeSystemFileStub } from './helpers/system_file_stub.mjs';
-import { createWatchLoader, writeWearEngineStub,
-  writeRouterStub, writeStorageStub }
+import { createWatchLoader, writeRouterStub, writeStorageStub }
   from './helpers/watch_module_loader.mjs';
 
 const tmp = mkdtempSync(join(tmpdir(), 'suyue-stress-'));
@@ -40,18 +39,11 @@ try {
     Buffer.from('长篇小说正文与翻页压力。'.repeat(90000), 'utf8'));
 
   const stubPath = writeSystemFileStub(tmp, disk);
-  const wearengineStubPath = writeWearEngineStub(tmp);
   const storageStubPath = writeStorageStub(tmp);
   const routerStubPath = writeRouterStub(tmp);
   const load = createWatchLoader({ tmpDir: tmp, stubPath,
-    wearengineStubPath, routerStubPath, storageStubPath });
+    routerStubPath, storageStubPath });
   const BookStorage = await load('storage/BookStorage.js');
-  const ProgressStore = await load('storage/ProgressStore.js');
-  const readerStorage = {
-    readBytes: BookStorage.readBytes,
-    saveLastBook: ProgressStore.saveLastBook,
-    saveProgress: ProgressStore.saveProgress
-  };
   const systemFile = (await import(stubPath)).default;
 
   // ---- 1. 文件接口永不回调：有限超时，且迟到回调不再生效 ----
@@ -83,7 +75,6 @@ try {
     const stuck = Object.create(reader.default);
     Object.assign(stuck, reader.default.data);
     stuck.bookId = bookId;
-    stuck.readerStorage = readerStorage;
     stuck.bundled = false;
     stuck.isBusy = false;
     stuck.isLoading = false;
@@ -113,7 +104,6 @@ try {
   const ref = canvasRef();
   press.$refs = { readerCanvas: ref };
   press.bookId = bookId;
-  press.readerStorage = readerStorage;
   press.bundled = false;
   press.canvasReady = true;
   press.isBusy = false;
@@ -167,7 +157,6 @@ try {
     const asyncRef = canvasRef();
     asyncPage.$refs = { readerCanvas: asyncRef };
     asyncPage.bookId = bookId;
-    asyncPage.readerStorage = readerStorage;
     asyncPage.bundled = false;
     asyncPage.canvasReady = true;
     asyncPage.isBusy = false;
@@ -235,7 +224,6 @@ try {
     const retryRef = canvasRef();
     retryPage.$refs = { readerCanvas: retryRef };
     retryPage.bookId = bookId;
-    retryPage.readerStorage = readerStorage;
     retryPage.bundled = false;
     retryPage.canvasReady = true;
     retryPage.isBusy = false;

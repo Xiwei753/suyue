@@ -15,31 +15,30 @@
 // - 翻页渲染完成立刻解锁并后台串行保存，进度写不回调也不卡阅读；
 // - 迟到的保存回调不会倒退已变化的阅读位置。
 import router from '@system.router';
-import { BOOK_CHAPTERS } from '../../books/BookChapters.g.js';
+import { getBook } from '../../storage/LibraryIndex';
+import { openBook, readBytes } from '../../storage/BookStorage';
+import { isBundled, bundledEntry,
+  readBundledWindow } from '../../storage/BundledBookSource';
+import { loadProgress,
+  saveProgress, saveLastBook } from '../../storage/ProgressStore';
 import { takeCanvasPage } from '../../reader/PageLayout';
 import { normalizeChapters, chapterIndexAt,
-  chapterListRows, chapterLabel } from '../../reader/Chapters';
+  chapterWindow, chapterLabel } from '../../reader/Chapters';
 import { drawPage } from '../../reader/CanvasTextRenderer';
-import { normalizeSettings } from '../../reader/ReaderSettings';
-import { createCrownTracker, crownStatus } from '../../reader/CrownInput';
 import { loadReaderPreferences, saveReaderPreferences }
   from '../../storage/ReaderPreferences.js';
-
-function wearBridge() {
-  if (typeof getApp !== 'function') return null;
-  try {
-    const app = getApp();
-    return app && app.data && app.data.wearBridge ?
-      app.data.wearBridge : null;
-  } catch (error) {
-    return null;
-  }
-}
+import { normalizeSettings } from '../../reader/ReaderSettings';
+import { createCrownTracker,
+  crownStatus } from '../../reader/CrownInput';
+import { isLowerHex } from '../../util/Validate';
 
 // 画布初始尺寸（HML width/height 绑定）；真实值以运行时画布为准。
 var CANVAS_SIZE = 452;
 // 圆屏安全内边距：留出边缘，避免贴边裁切。
 var EDGE_PADDING = 10;
+// 章节浏览窗口：只渲染 5 行，翻组不跳转、不把全量标题塞进 UI。
+var CHAPTER_PAGE_SIZE = 5;
+
 export default {
   data: {
     // issue #10：Lite 通过目标页 data 的**同名字段**注入路由参数，
@@ -65,33 +64,18 @@ export default {
     isBusy: true,
     // 正文与设置互斥显示。左滑设置，系统右滑返回。
     settingsOpen: false,
-    // 章节面板嵌在设置页内，完整目录由原生列表纵向滚动。
+    // 章节面板嵌在设置页内，只展示当前章节附近的有界行数。
     hasChapters: false,
     chapterOpen: false,
     chapterLabel: '',
     chapterRows: [],
+    chapterWindowStart: 0,
+    chapterWindowPrevEnabled: false,
+    chapterWindowNextEnabled: false,
     chapterPrevEnabled: false,
     chapterNextEnabled: false
   },
   onInit() {
-    let app = null;
-    try {
-      if (typeof getApp === 'function') app = getApp();
-    } catch (error) {}
-    try {
-      this.readerStorage = app && app.data ? app.data.readerStorage : null;
-    } catch (error) {
-      this.readerStorage = null;
-    }
-    if (!this.readerStorage ||
-        typeof this.readerStorage.isLowerHex !== 'function') {
-      this.readerUnavailable = true;
-      this.readingError = true;
-      this.body = '阅读服务未就绪\n请返回书架重试';
-      this.pageHint = '阅读服务未就绪';
-      this.isBusy = false;
-      return;
-    }
     this.history = [];
     this.settings = normalizeSettings(null);
     this.crownStatus = crownStatus();
@@ -112,11 +96,11 @@ export default {
     // 待绘制的页（数据先到、画布后到时先存这里）。
     this.pending = null;
     this.ctx = null;
-    this.pendingRemoteOffset = null;
     // onShow 才允许取得 Canvas context；数据提前到达只保留 pending。
     this.canvasReady = false;
     this.chapters = [];
     this.chapterIndex = -1;
+    this.chapterWindowStart = 0;
     this.chapterOpen = false;
     this.lastBookSaved = false;
     this.lastBookSaving = false;
@@ -124,7 +108,7 @@ export default {
     // 切勿在这里重置 this.bookId，否则会把收到的参数清空。
     const bookId = this.bookId;
     if (typeof bookId !== 'string' ||
-        !this.readerStorage.isLowerHex(bookId, 16)) {
+        !isLowerHex(bookId, 16)) {
       this.readingError = true;
       this.body = '打开失败：未收到有效书籍编号\\n请返回书架重选';
       this.pageHint = '未知书籍，请返回书架选择';
@@ -133,29 +117,15 @@ export default {
     }
     // 内置书（issue #10）：正文来自 rawfile 资源，按需窗口读取；
     // 外部书仍走原有文件通路。两者都**先出正文**再看进度。
-    this.bundled = this.readerStorage.isBundled(bookId);
-    const wear = wearBridge();
-    const self = this;
-    this.applyHandler = function (payload) {
-      self.applyRemoteProgress(payload);
-    };
-    // Wear Engine is optional for local reading. A receiver setup failure
-    // must not prevent opening a book already stored on the watch.
-    if (wear && typeof wear.setActiveBook === 'function') {
-      wear.setActiveBook(bookId);
-    }
-    if (wear && typeof wear.setApplyHandler === 'function') {
-      wear.setApplyHandler(this.applyHandler);
-    }
+    this.bundled = isBundled(bookId);
     if (this.bundled) {
-      const entry = this.readerStorage.bundledEntry(bookId);
-      if (entry) entry.chapters = BOOK_CHAPTERS[bookId] || entry.chapters;
+      const entry = bundledEntry(bookId);
       this.title = entry ? entry.title : '内置书籍';
       this.setChapters(entry);
       this.startReading();
       return;
     }
-    this.readerStorage.openBook(bookId, (state) => {
+    openBook(bookId, (state) => {
       if (!state.ok) {
         this.readingError = true;
         this.body = '打开失败：书籍不存在或已删除';
@@ -163,7 +133,7 @@ export default {
         this.isBusy = false;
         return;
       }
-      this.readerStorage.getBook(bookId, (entry) => {
+      getBook(bookId, (entry) => {
         this.title = entry ? entry.title : '未知书名';
         this.setChapters(entry);
         this.startReading();
@@ -182,7 +152,16 @@ export default {
     this.chapterIndex = chapterIndexAt(this.chapters, this.offset);
     this.chapterLabel = chapterLabel(this.chapters, this.chapterIndex);
     var count = this.chapters.length;
-    this.chapterRows = chapterListRows(this.chapters, this.chapterIndex);
+    var maxStart = Math.max(0, count - CHAPTER_PAGE_SIZE);
+    var start = typeof this.chapterWindowStart === 'number' ?
+      this.chapterWindowStart : 0;
+    if (start < 0) start = 0;
+    if (start > maxStart) start = maxStart;
+    this.chapterWindowStart = start;
+    this.chapterRows = chapterWindow(this.chapters, start,
+      CHAPTER_PAGE_SIZE, this.chapterIndex);
+    this.chapterWindowPrevEnabled = start > 0;
+    this.chapterWindowNextEnabled = start < maxStart;
     this.chapterPrevEnabled = this.chapterIndex > 0;
     this.chapterNextEnabled = this.chapterIndex >= 0 &&
       this.chapterIndex < count - 1;
@@ -201,7 +180,7 @@ export default {
   startReading() {
     this.isBusy = true;
     this.setLoadingStage('读取阅读位置');
-    this.readerStorage.loadProgress(this.bookId, (progress) => {
+    loadProgress(this.bookId, (progress) => {
       if (!progress.ok) {
         this.readingError = true;
         this.body = '阅读位置读取失败：' + progress.code;
@@ -282,8 +261,7 @@ export default {
     if (this.isLoading || !this.bookId) return;
     this.isLoading = true;
     this.isBusy = true;
-    const readSource = this.bundled ?
-      this.readerStorage.readBundledWindow : this.readerStorage.readBytes;
+    const readSource = this.bundled ? readBundledWindow : readBytes;
     readSource(this.bookId, offset, 2048, (data) => {
       this.isLoading = false;
       if (!data.ok) {
@@ -405,26 +383,12 @@ export default {
         !pending.skipSave) {
       const self = this;
       this.lastBookSaving = true;
-      this.readerStorage.saveLastBook(this.bookId, function (result) {
+      saveLastBook(this.bookId, function (result) {
         self.lastBookSaving = false;
         if (result && result.ok) self.lastBookSaved = true;
       });
     }
     if (pending.done) pending.done(true);
-  },
-  // 同步服务已校验书籍摘要/范围/UTF-8 边界并写入进度；
-  // 这里只负责清空不适用的历史页并重绘。skipSave 防止把
-  // 远端进度再当成“本地新阅读”回写/回传。
-  applyRemoteProgress(payload) {
-    if (!payload || payload.bookId !== this.bookId ||
-        !this.progressReady || this.isLoading) return;
-    if (typeof payload.offset !== 'number' ||
-        payload.offset < 0 || !this.chapters) return;
-    this.history = [];
-    this.userMoved = true;
-    this.settingsOpen = false;
-    this.chapterOpen = false;
-    this.loadPage(payload.offset, undefined, undefined, true);
   },
   // 重绘当前页（设置返回 / 画布重建 / 主题变化后调用）。
   redraw() {
@@ -442,7 +406,7 @@ export default {
   saveNext() {
     this.saving = true;
     this.saveWanted = false;
-    this.readerStorage.saveProgress(this.bookId, this.offset, this.history,
+    saveProgress(this.bookId, this.offset, this.history,
       this.currentSettings(), (state) => {
         this.saving = false;
         if (!state.ok) {
@@ -456,7 +420,8 @@ export default {
           this.saveNext();
         } else if (this.returnToShelf) {
           this.returnToShelf = false;
-          this.navigateToShelf();
+          router.replace({ uri: 'pages/index/index',
+            params: { resume: '0' } });
         }
       });
   },
@@ -505,11 +470,24 @@ export default {
     if (!this.hasChapters) return;
     this.settingsOpen = true;
     this.chapterOpen = true;
-    // 完整目录由章节原生 list 滚动；这里只高亮当前章节。
+    // 每次打开从当前章节居中；之后翻组不改变阅读位置。
+    this.chapterWindowStart = Math.max(0,
+      this.chapterIndex - Math.floor(CHAPTER_PAGE_SIZE / 2));
     this.refreshChapterView();
   },
   closeChapters() {
     this.chapterOpen = false;
+    this.refreshChapterView();
+  },
+  // 章节面板浏览：只移动 5 行窗口，不跳转、不产生阅读进度。
+  chapterWindowPrevious() {
+    if (!this.chapterOpen) return;
+    this.chapterWindowStart -= CHAPTER_PAGE_SIZE;
+    this.refreshChapterView();
+  },
+  chapterWindowNext() {
+    if (!this.chapterOpen) return;
+    this.chapterWindowStart += CHAPTER_PAGE_SIZE;
     this.refreshChapterView();
   },
   // Canvas 始终挂载，返回阅读后只绘制一次当前页。
@@ -593,8 +571,7 @@ export default {
   flushPreferences() {
     this.prefSaving = true;
     this.prefWanted = false;
-    saveReaderPreferences(this.bookId,
-      this.currentSettings(), (result) => {
+    saveReaderPreferences(this.bookId, this.currentSettings(), (result) => {
       this.prefSaving = false;
       if (!result.ok) {
         this.pageHint = '设置保存失败：' + (result.code || 'unknown');
@@ -606,24 +583,8 @@ export default {
   // 隐藏 slider 挂载后抢占表冠焦点；设备上若 $refs.crownProxy
   // 不存在则静默跳过，触屏「上页/下页」照常可用。
   onShow() {
-    if (this.readerUnavailable) return;
-    const wear = wearBridge();
-    if (wear && typeof wear.onReceiverPageShow === 'function') {
-      wear.onReceiverPageShow('pages/reader/reader');
-    }
     this.canvasReady = true;
     this.ctx = null;
-    var pendingOffset = wear &&
-      typeof wear.takePendingApply === 'function' ?
-      wear.takePendingApply(this.bookId) : null;
-    if (pendingOffset !== null) this.pendingRemoteOffset = pendingOffset;
-    if (this.pendingRemoteOffset !== null && this.progressReady &&
-        !this.isLoading) {
-      var remoteOffset = this.pendingRemoteOffset;
-      this.pendingRemoteOffset = null;
-      this.applyRemoteProgress({ bookId: this.bookId,
-        offset: remoteOffset });
-    }
     this.focusCrown(true);
     const ctx = this.acquireContext();
     if (!ctx) {
@@ -635,28 +596,14 @@ export default {
       !this.isLoading && !this.settingsOpen) this.redraw();
   },
   onHide() {
-    if (this.readerUnavailable) return;
-    const wear = wearBridge();
-    if (wear && typeof wear.onReceiverPageHide === 'function') {
-      wear.onReceiverPageHide();
-    }
     this.canvasReady = false;
     this.ctx = null;
     this.focusCrown(false);
   },
   onDestroy() {
-    const wear = wearBridge();
     this.canvasReady = false;
     this.ctx = null;
     this.pending = null;
-    if (wear && this.applyHandler &&
-        typeof wear.clearApplyHandler === 'function') {
-      wear.clearApplyHandler(this.applyHandler);
-      this.applyHandler = null;
-    }
-    if (wear && typeof wear.clearActiveBook === 'function') {
-      wear.clearActiveBook();
-    }
     this.focusCrown(false);
   },
   focusCrown(focus) {
@@ -680,26 +627,11 @@ export default {
   backToLibrary() {
     // 必须在退出前等待最后一次阅读位置写入完成（有 2.5 秒上限）。
     if (!this.progressReady || !this.bookId) {
-      this.navigateToShelf();
+      router.replace({ uri: 'pages/index/index',
+        params: { resume: '0' } });
       return;
     }
     this.returnToShelf = true;
     this.scheduleSave();
-  },
-  navigateToShelf() {
-    const wear = wearBridge();
-    if (wear && typeof wear.markPageNavigation === 'function') {
-      wear.markPageNavigation('pages/index/index');
-    }
-    try {
-      router.replace({ uri: 'pages/index/index',
-        params: { resume: '0' } });
-    } catch (error) {
-      if (wear && typeof wear.clearPageNavigation === 'function') {
-        wear.clearPageNavigation();
-      }
-      this.pageHint = '返回书架失败：路由异常';
-      console.error('[suyue] E_ROUTE_SHELF ' + error);
-    }
   }
 };

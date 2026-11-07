@@ -6,8 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeSystemFileStub } from './helpers/system_file_stub.mjs';
-import { createWatchLoader, writeWearEngineStub,
-  writeRouterStub, writeStorageStub }
+import { createWatchLoader, writeRouterStub, writeStorageStub }
   from './helpers/watch_module_loader.mjs';
 
 const temp=mkdtempSync(join(tmpdir(),'suyue-progress-'));
@@ -15,22 +14,13 @@ const disk=mkdtempSync(join(tmpdir(),'suyue-progress-disk-'));
 const id='aaaaaaaaaaaaaaaa';
 try {
   const stub=writeStorageStub(temp);
-  const wearengineStubPath=writeWearEngineStub(temp);
   const routerStub=writeRouterStub(temp);
   const fileStub=writeSystemFileStub(temp,disk);
   const load=createWatchLoader({tmpDir:temp,stubPath:fileStub,
-    wearengineStubPath,routerStubPath:routerStub,storageStubPath:stub});
+    routerStubPath:routerStub,storageStubPath:stub});
   const progress=await load('storage/ProgressStore.js');
   const prefs=await load('storage/ReaderPreferences.js');
   const reader=await load('pages/reader/reader.js');
-  const app=(await load('app.js')).default;
-  const readerStorage={
-    isLowerHex:(value,length)=>typeof value==='string' &&
-      value.length===length && /^[0-9a-f]+$/.test(value),
-    loadProgress:(bookId,callback)=>progress.loadProgress(bookId,callback),
-    saveProgress:progress.saveProgress
-  };
-  app.data.readerStorage=readerStorage;
   const storage=(await import(stub)).default;
   const router=(await import(routerStub)).default;
   const fs=(await import(fileStub)).default;
@@ -70,7 +60,6 @@ try {
       first.settingsTouched=false;
       first.progressReady=false;
       first.renderedOnce=false;
-      first.readerStorage=readerStorage;
       const pages=[];
       first.loadPage=function(offset){pages.push(offset)};
       first.startReading();
@@ -117,8 +106,6 @@ try {
   const badPage=Object.create(reader.default);
   Object.assign(badPage,reader.default.data);
   badPage.bookId=id;
-    badPage.readerStorage=readerStorage;
-    badPage.readerStorage=readerStorage;
   badPage.loadPage=()=>{throw Error('must never load page zero after corrupt KV')};
   badPage.startReading();
   assert.equal(badPage.readingError,true);
@@ -155,7 +142,6 @@ try {
   const p=Object.create(reader.default);
   Object.assign(p,reader.default.data);
   p.bookId=id;p.history=[];p.offset=0;p.progressReady=false;
-  p.readerStorage=readerStorage;
   p.settingsTouched=false;p.userMoved=false;p.saving=false;p.saveWanted=false;
   p.progressError='';p.returnToShelf=false;p.isBusy=true;
   const rendered=[];

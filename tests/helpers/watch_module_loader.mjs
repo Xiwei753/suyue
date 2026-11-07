@@ -13,18 +13,11 @@ export function createWatchLoader(options) {
   const wearengineStubPath = options.wearengineStubPath;
   const routerStubPath = options.routerStubPath;
   const storageStubPath = options.storageStubPath;
-  const sourceOverrides = options.sourceOverrides || {};
   const loaded = new Map();
   const load = async (rel) => {
     if (loaded.has(rel)) return loaded.get(rel);
-    // A Lite JS FA page reaches app-level services through getApp(). Model
-    // that runtime lookup when unit tests load a page module directly.
-    if (rel.startsWith('pages/') && !loaded.has('app.js')) {
-      await load('app.js');
-    }
     const srcPath = join(WATCH_ROOT, rel);
-    let src = Object.prototype.hasOwnProperty.call(sourceOverrides, rel) ?
-      sourceOverrides[rel] : readFileSync(srcPath, 'utf8');
+    let src = readFileSync(srcPath, 'utf8');
     const importRe = /from\s+'([^']+)'/g;
     let m;
     const deps = [];
@@ -60,9 +53,6 @@ export function createWatchLoader(options) {
     writeFileSync(modPath, src);
     const mod = await import(modPath);
     loaded.set(rel, mod);
-    if (rel === 'app.js') {
-      globalThis.getApp = () => mod.default;
-    }
     return mod;
   };
   return load;
@@ -74,7 +64,6 @@ export function writeWearEngineStub(tmpDir,
   const stubPath = join(tmpDir, stubName);
   writeFileSync(stubPath, `
 const calls = [];
-let subscribeOptions = null;
 const stub = {
   getWearEngineVersion(o) {
     calls.push(['getWearEngineVersion']);
@@ -90,7 +79,6 @@ const stub = {
   },
   subscribeMsg(o) {
     calls.push(['subscribeMsg']);
-    subscribeOptions = o || null;
     o && o.success && o.success({ isRegister: true });
   },
   unsubscribeMsg() { calls.push(['unsubscribeMsg']); },
@@ -100,10 +88,6 @@ const stub = {
   }
 };
 stub.__calls = calls;
-stub.__emit = (data) => {
-  subscribeOptions && subscribeOptions.success &&
-    subscribeOptions.success(data);
-};
 export default stub;
 `);
   return stubPath;
@@ -145,10 +129,6 @@ const stub = {
   },
   set(o) {
     values[o.key] = o.value;
-    o.success && o.success();
-  },
-  delete(o) {
-    delete values[o.key];
     o.success && o.success();
   },
   __values: values

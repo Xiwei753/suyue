@@ -1,234 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Wear Engine 适配层：版本检查、手机 APP ID 门控、
-// 消息订阅；传书与进度处理器由首个页面注入，避免 app 入口重复打包
-// 页面存储依赖。
+// 消息订阅；协议消息与文件通道路由到
+// IncomingBookReceiver；所有回执经
+// wearengine.sendMsg 发回手机（P0-6）。
 // Based on Wear Engine receiver call patterns from
 // Explore in HMOS Wearable (MIT).
 // Does not vendor the upstream Huawei SDK wrapper (Apache-2.0).
 import wearengine from '@system.wearengine';
 import { PHONE_BUNDLE_NAME, PHONE_APP_ID } from './PeerConfig';
+import { IncomingBookReceiver } from './IncomingBookReceiver';
 
 let subscribed = false;
-let receiveStarting = false;
-let subscribeAttempted = false;
-let receiveAttemptId = 0;
-let hasShownPage = false;
-let pageWasHidden = false;
-let pageNavigationPending = false;
-let pageNavigationTarget = '';
-let appCreateSeen = false;
 let receiver = null;
-let progressSync = null;
-let receiverServicesReady = false;
-let pendingBeginTrigger = '';
-var receiveStatusHandler = null;
-var latestReceiveStatus = '';
-var receiverStatusHandler = null;
-var latestReceiverStatus = '接收器：尚未启动';
 // 手表 → 手机的唯一回执通道（wearengine.sendMsg）。
 var sendToPhoneImpl = null;
-// 对端 deviceId。无回调字段时按 Lite Wear Engine 示例使用 'remote'；
-// subscribeMsg 回调若提供 deviceId，则优先沿用该值。
+// 对端 deviceId。'remote' 是照华为 Lite 示例写的**占位回退值**，
+// 从未在真机上确认过；subscribeMsg 回调里若带真实 deviceId 就采用它。
 var peerDeviceId = '';
-var loggedRemoteDeviceDefault = false;
-
-function notifyReceiveStatus(message) {
-  latestReceiveStatus = message;
-  if (typeof receiveStatusHandler === 'function') {
-    receiveStatusHandler(message);
-  } else {
-    console.info('Wear receiver status: ' + message);
-  }
-}
-
-function notifyReceiverStatus(message) {
-  latestReceiverStatus = message;
-  console.info('Wear receiver status: ' + message);
-  if (typeof receiverStatusHandler === 'function') {
-    receiverStatusHandler(message);
-  }
-}
-
-export function getReceiveStatus() {
-  try {
-    const event = JSON.parse(latestReceiveStatus);
-    if (event && event.type === 'RESULT') {
-      return event.ok ? '接收成功，已加入书架' :
-        '传书失败：' + (event.reason || '未知错误');
-    }
-  } catch (error) {}
-  return latestReceiveStatus;
-}
-
-export function setReceiveStatusHandler(onStatus) {
-  receiveStatusHandler = typeof onStatus === 'function' ? onStatus : null;
-  if (receiveStatusHandler) receiveStatusHandler(getReceiveStatus());
-}
-
-export function getReceiverStatus() {
-  return latestReceiverStatus;
-}
-
-export function setReceiverStatusHandler(onStatus) {
-  receiverStatusHandler = typeof onStatus === 'function' ? onStatus : null;
-  if (receiverStatusHandler) receiverStatusHandler(getReceiverStatus());
-}
-
-export function reportAppLifecycle(event) {
-  if (event === 'app.onCreate 已执行') appCreateSeen = true;
-  if (event === 'app.onDestroy 已执行') appCreateSeen = false;
-  notifyReceiverStatus('应用生命周期：' + event);
-}
-
-// 页面切换由应用内路由主动标记，以免把书架↔阅读页误当成退后台。
-export function markPageNavigation(target) {
-  pageNavigationPending = true;
-  pageNavigationTarget = target || '';
-}
-
-export function clearPageNavigation() {
-  pageNavigationPending = false;
-  pageNavigationTarget = '';
-}
-
-export function onReceiverPageHide() {
-  pageWasHidden = true;
-}
-
-// Lite 页面 onShow 同时覆盖应用回到前台和路由切换。路由切换沿用
-// app.js 建立的唯一订阅；只有页面此前隐藏且不是已标记的路由切换，
-// 才清理可能过期的状态并做一次有界重注册，不使用计时器循环。
-export function onReceiverPageShow(pageName) {
-  if (!hasShownPage) {
-    hasShownPage = true;
-    pageWasHidden = false;
-    clearPageNavigation();
-    if (!subscribed && !receiveStarting) {
-      if (appCreateSeen) {
-        resetAndBeginReceive('first-page-retry',
-          '首屏：启动注册已结束但无订阅，补注册一次');
-      } else {
-        notifyReceiverStatus('首屏：未收到 app.onCreate，开始注册');
-        beginReceive('page-show-fallback');
-      }
-    } else {
-      console.info('Wear receiver lifecycle: first page shown after app creation');
-    }
-    return;
-  }
-  if (pageNavigationPending &&
-      (!pageNavigationTarget || pageNavigationTarget === pageName)) {
-    clearPageNavigation();
-    pageWasHidden = false;
-    console.info('Wear receiver lifecycle: route changed; retain app-level subscription');
-    return;
-  }
-  if (pageNavigationPending) {
-    console.info('Wear receiver lifecycle: expected route was not shown');
-    clearPageNavigation();
-  }
-  if (!pageWasHidden) {
-    console.info('Wear receiver lifecycle: page shown without hide; keep subscription');
-    return;
-  }
-  pageWasHidden = false;
-  refreshReceiveOnForeground();
-}
-
-function refreshReceiveOnForeground() {
-  resetAndBeginReceive('foreground-resume',
-    '前台恢复：清理上次订阅并重新注册');
-}
-
-function resetAndBeginReceive(trigger, status) {
-  notifyReceiverStatus(status);
-  // 让旧异步回调失效，避免迟到的成功把新一轮状态覆盖。
-  receiveAttemptId++;
-  receiveStarting = false;
-  subscribed = false;
-  sendToPhoneImpl = null;
-  peerDeviceId = '';
-  loggedRemoteDeviceDefault = false;
-  if (subscribeAttempted) {
-    try {
-      wearengine.unsubscribeMsg();
-      console.info('unsubscribeMsg requested before foreground re-register');
-    } catch (error) {
-      console.error('foreground unsubscribeMsg failed: ' + error);
-    }
-  }
-  subscribeAttempted = false;
-  beginReceive(trigger);
-}
-
-// Local-only completion event. This does not use sendToPhone / Wear Engine;
-// the file callback fires only after digest verification and LibraryIndex.addBook.
-export function reportLocalReceiveOutcome(outcome) {
-  const event = outcome && outcome.ok ?
-    { type: 'RESULT', ok: true } : {
-      type: 'RESULT', ok: false,
-      reason: outcome && outcome.reason || 'E_RECEIVE_FAILED'
-    };
-  notifyReceiveStatus(JSON.stringify(event));
-}
-
-export function reportReceiveStatus(message) {
-  notifyReceiveStatus(message);
-}
-
-export function setBookReceiver(instance) {
-  receiver = instance || null;
-}
-
-export function setProgressSync(handlers) {
-  progressSync = handlers || null;
-}
-
-export function configureReceiverServices() {
-  receiverServicesReady = !!receiver && !!progressSync;
-  if (!receiverServicesReady) {
-    notifyReceiverStatus('接收器初始化失败：页面服务不可用');
-    return;
-  }
-  if (pendingBeginTrigger && !subscribed && !receiveStarting) {
-    const trigger = pendingBeginTrigger;
-    pendingBeginTrigger = '';
-    beginReceive(trigger);
-  }
-}
-
-export function sendMessage(text) {
-  if (typeof sendToPhoneImpl === 'function') sendToPhoneImpl(text);
-}
-
-export function setApplyHandler(handler) {
-  if (progressSync && progressSync.setApplyHandler) {
-    progressSync.setApplyHandler(handler);
-  }
-}
-
-export function clearApplyHandler(handler) {
-  if (progressSync && progressSync.clearApplyHandler) {
-    progressSync.clearApplyHandler(handler);
-  }
-}
-
-export function takePendingApply(bookId) {
-  return progressSync && progressSync.takePendingApply ?
-    progressSync.takePendingApply(bookId) : null;
-}
-
-export function setActiveBook(bookId) {
-  if (progressSync && progressSync.setActiveBook) {
-    progressSync.setActiveBook(bookId);
-  }
-}
-
-export function clearActiveBook() {
-  if (progressSync && progressSync.clearActiveBook) {
-    progressSync.clearActiveBook();
-  }
-}
+var warnedDeviceIdFallback = false;
 
 // 回调里可能携带 deviceId 的候选字段名（与文件引用一样逐一探测，
 // 不合成、不猜测具体值）。真机抓到后应把命中的字段名固化下来。
@@ -246,55 +35,14 @@ export function capturePeerDevice(data) {
   return '';
 }
 
-function handleRegisterCallback() {
-  subscribed = true;
-  receiveStarting = false;
-  console.info('subscribeMsg register ok: peer=' + PHONE_BUNDLE_NAME);
-  notifyReceiverStatus('注册回调：isRegister=true（可达性待验）');
-}
-
-function handleFileCallback(data) {
-  const ref = extractFileRef(data);
-  if (!ref) {
-    notifyReceiveStatus('文件通道回调缺少文件路径字段');
-  } else {
-    receiveFile(ref.uri, ref.field);
-  }
-}
-
-function handleMessageCallback(data) {
-  if (!data || typeof data.message !== 'string') {
-    notifyReceiveStatus('消息格式异常：message 不是字符串');
-    return;
-  }
-  routeMessage(data.message);
-}
-
-function handleSubscribeSuccess(data, isCurrentAttempt) {
-  if (!isCurrentAttempt()) return;
-  const idField = capturePeerDevice(data);
-  if (idField) console.info('peer deviceId via data.' + idField);
-  if (data && data.isRegister) return handleRegisterCallback();
-  if (data && data.isFileType) return handleFileCallback(data);
-  handleMessageCallback(data);
-}
-
-export function beginReceive(trigger) {
+export function beginReceive(onStatus) {
+  const notify = (message) => {
+    if (typeof onStatus === 'function') onStatus(message);
+  };
   if (!PHONE_APP_ID) {
-    notifyReceiverStatus('接收器未配置：缺少手机 APP ID');
+    notify('未配置手机 APP ID，传书接收暂未开启');
     return;
   }
-  if (!receiverServicesReady) {
-    pendingBeginTrigger = trigger || '应用启动';
-    notifyReceiverStatus('接收器等待页面服务就绪');
-    return;
-  }
-  if (subscribed || receiveStarting) return;
-  const attemptId = ++receiveAttemptId;
-  const isCurrentAttempt = () => attemptId === receiveAttemptId;
-  receiveStarting = true;
-  notifyReceiverStatus('接收器启动：' + (trigger || '应用启动'));
-  notifyReceiverStatus('阶段：读取 Wear Engine 版本');
   // 手表 → 手机：唯一回执通道。
   // 形状以华为 Lite 示例为准（待真机验证）：
   //   wearengine.sendMsg({deviceId, bundleName,
@@ -302,10 +50,12 @@ export function beginReceive(trigger) {
   const sendToPhone = (text) => {
     var deviceId = peerDeviceId;
     if (!deviceId) {
-      // 记录回调没有提供 deviceId；按 Lite 示例使用 remote。
-      if (!loggedRemoteDeviceDefault) {
-        loggedRemoteDeviceDefault = true;
-        console.info('subscribeMsg 未提供 deviceId，sendMsg 使用 Lite 示例值 remote');
+      // 不静默拿占位值冒充真值：告警一次，日志里能看出这条回执是
+      // 走的未验证回退路径。真机确认后应改为拿到 deviceId 再发送。
+      if (!warnedDeviceIdFallback) {
+        warnedDeviceIdFallback = true;
+        console.warn('sendMsg 使用未验证的占位 deviceId "remote"：'
+          + '回调中未取得真实 deviceId，回执能否送达待真机确认');
       }
       deviceId = 'remote';
     }
@@ -329,111 +79,90 @@ export function beginReceive(trigger) {
     wearengine.getWearEngineVersion({
       sdkVersion: '3',
       complete: (versionString) => {
-        if (!isCurrentAttempt()) return;
         const raw = String(versionString || '').split('.');
         const version = Number(raw[raw.length - 1]) || 0;
         if (version < 401) {
-          receiveStarting = false;
-          notifyReceiverStatus('结果：Wear Engine 版本待适配 ' +
-            String(versionString || version));
+          notify('Wear Engine 版本待适配：' + version);
           return;
         }
-        notifyReceiverStatus('阶段：Wear Engine 版本可用 ' +
-          String(versionString || version));
-        notifyReceiverStatus('阶段：设置手机包名');
         wearengine.setPackageName({
           appName: PHONE_BUNDLE_NAME,
           complete: () => {
-            if (!isCurrentAttempt()) return;
             console.info('setPackageName ok: ' + PHONE_BUNDLE_NAME);
-            notifyReceiverStatus('阶段：手机包名已设置；设置 APP ID');
             wearengine.setFingerprint({
               appName: PHONE_BUNDLE_NAME,
               appCert: PHONE_APP_ID,
               complete: () => {
-                if (!isCurrentAttempt()) return;
                 console.info('setFingerprint ok: peer=' +
                   PHONE_BUNDLE_NAME + ' appIdPrefix=' +
                   PHONE_APP_ID.substring(0, 4) + '…');
-                notifyReceiverStatus('阶段：手机 APP ID 已设置；注册消息接收');
-                subscribeAttempted = true;
+                receiver = new IncomingBookReceiver(
+                  notify, sendToPhone);
                 wearengine.subscribeMsg({
-                  success: (data) =>
-                    handleSubscribeSuccess(data, isCurrentAttempt),
+                  success: (data) => {
+                    // 先尽力取真实 deviceId，供回执使用；
+                    // 取到就记下命中的字段名，便于真机核对。
+                    const idField = capturePeerDevice(data);
+                    if (idField) {
+                      console.info('peer deviceId via data.' + idField);
+                    }
+                    if (data && data.isRegister) {
+                      subscribed = true;
+                      console.info('subscribeMsg register ok: peer=' +
+                        PHONE_BUNDLE_NAME);
+                      notify('传书接收已开启');
+                    } else if (data && data.isFileType) {
+                      // 文件通道到达（P0-2）：字段名
+                      // 以 GT4 Lite SDK 实测为准。候选
+                      // 字段逐一取值，取到后记录来源；
+                      // 全部缺失则不落盘、只报状态。
+                      const ref = extractFileRef(data);
+                      if (!ref) {
+                        notify('文件通道回调缺少文件路径字段');
+                      } else {
+                        receiveFile(ref.uri, ref.field);
+                      }
+                    } else if (data && typeof data.message === 'string') {
+                      routeMessage(data.message);
+                    }
+                  },
                   fail: (reason, code) => {
-                    if (!isCurrentAttempt()) return;
-                    receiveStarting = false;
                     console.error('subscribeMsg failed code=' + code);
-                    notifyReceiverStatus('订阅失败 code=' +
-                      (code === undefined ? 'unknown' : code));
+                    notify('接收注册失败：' + code);
                   }
                 });
               },
               fail: (reason, code) => {
-                if (!isCurrentAttempt()) return;
-                receiveStarting = false;
                 console.error('setFingerprint failed code=' + code +
                   ' peer=' + PHONE_BUNDLE_NAME);
-                notifyReceiverStatus('APP ID 设置失败 code=' +
-                  (code === undefined ? 'unknown' : code));
+                notify('手机 APP ID 配置失败：' + code);
               }
             });
           },
           fail: (reason, code) => {
-            if (!isCurrentAttempt()) return;
-            receiveStarting = false;
             console.error('setPackageName failed code=' + code +
               ' peer=' + PHONE_BUNDLE_NAME);
-            notifyReceiverStatus('包名设置失败 code=' +
-              (code === undefined ? 'unknown' : code));
+            notify('手机包名配置失败：' + code);
           }
         });
-      },
-      fail: (reason, code) => {
-        if (!isCurrentAttempt()) return;
-        receiveStarting = false;
-        console.error('getWearEngineVersion failed code=' + code);
-        notifyReceiverStatus('读取版本失败 code=' +
-          (code === undefined ? 'unknown' : code));
       }
     });
   } catch (error) {
-    if (!isCurrentAttempt()) return;
-    receiveStarting = false;
-    const reason = error && error.message || 'unknown';
-    console.error('Wear Engine initialization threw: ' + reason);
-    notifyReceiverStatus('Wear Engine 初始化异常');
+    notify('Wear Engine 不可用：' + (error && error.message || 'unknown'));
   }
 }
 
 function routeMessage(messageText) {
-  let message;
-  try {
-    message = JSON.parse(messageText);
-  } catch (error) {
-    notifyReceiveStatus('收到非协议消息');
-    return;
-  }
-  if (!message || typeof message !== 'object' || Array.isArray(message) ||
-      typeof message.type !== 'string' || message.type.length === 0 ||
-      message.type.length > 64 ||
-      !Object.prototype.hasOwnProperty.call(message, 'v') ||
-      typeof message.v !== 'number') {
-    notifyReceiveStatus('协议消息格式无效');
-    return;
-  }
-  if (message.v !== 0) {
-    notifyReceiveStatus('协议版本不支持');
-    return;
-  }
-  console.info('Wear message received type=' + message.type);
-  // 阅读进度是独立小消息，不进入传书状态机；仍复用同一次
-  // subscribeMsg 和同一个 sendToPhone 通道。
-  if (progressSync && typeof progressSync.handleMessage === 'function' &&
-      progressSync.handleMessage(message, sendToPhoneImpl)) return;
   if (!receiver) return;
-  // CHUNK/FINISH/RESUME 正文消息不受支持；正文只走文件通道。
-  receiver.onMessage(message);
+  // 记录对端消息是否真正到达手表；类型解析失败也不阻断协议。
+  var type = 'unknown';
+  try {
+    type = JSON.parse(messageText).type || 'unknown';
+  } catch (e) {}
+  console.info('Wear message received type=' + type);
+  // ACK/RESUME/RESULT 全部由接收器内部
+  // 经统一响应通道（sendToPhone）回发。
+  receiver.onMessage(messageText);
 }
 
 // 文件通道回调字段提取（P0-2）：
@@ -454,48 +183,32 @@ export function extractFileRef(data) {
   return null;
 }
 
-  // 文件通道：把 Wear Engine 送达的文件交给
-  // IncomingBookReceiver 复制 → 校验 → 入库；
-  // 手机不等待手表应用层 RESULT。
+// 文件通道：把 Wear Engine 送达的文件交给
+// IncomingBookReceiver 复制 → 校验 → 入库。
+// 结果（RESULT）由接收器统一经 sendToPhone 回发。
+// 单本在途约束下，收到的文件唯一对应当前
+// 待传 transferId（P0-2）。
 function receiveFile(filePath, field) {
   if (!receiver || !filePath) {
     return;
   }
   console.info('file channel ref via data.' + field);
   receiver.receiveFileChannel(filePath, null, (outcome) => {
-    reportLocalReceiveOutcome(outcome);
-    if (!outcome || !outcome.ok) {
+    if (!outcome.ok) {
       console.error('file channel failed: ' +
-        (outcome && outcome.reason || 'E_RECEIVE_FAILED'));
+        outcome.reason);
     }
   });
 }
 
 export function stopReceive() {
-  receiveAttemptId++;
   receiver = null;
   sendToPhoneImpl = null;
-  peerDeviceId = '';
-  loggedRemoteDeviceDefault = false;
-  receiveStarting = false;
-  appCreateSeen = false;
-  const shouldUnsubscribe = subscribed || subscribeAttempted;
-  subscribed = false;
-  subscribeAttempted = false;
-  receiveStatusHandler = null;
-  receiverStatusHandler = null;
-  hasShownPage = false;
-  pageWasHidden = false;
-  pageNavigationPending = false;
-  pageNavigationTarget = '';
-  receiverServicesReady = false;
-  pendingBeginTrigger = '';
-  progressSync = null;
-  receiver = null;
-  if (!shouldUnsubscribe) return;
+  if (!subscribed) return;
   try {
     wearengine.unsubscribeMsg();
   } catch (error) {
     console.error('unsubscribeMsg failed: ' + error);
   }
+  subscribed = false;
 }

@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeSystemFileStub } from './helpers/system_file_stub.mjs';
-import { createWatchLoader, writeWearEngineStub, writeRouterStub,
+import { createWatchLoader, writeRouterStub,
   writeStorageStub } from './helpers/watch_module_loader.mjs';
 
 const tmp = mkdtempSync(join(tmpdir(), 'suyue-prefs-'));
@@ -13,11 +13,9 @@ const sandbox = mkdtempSync(join(tmpdir(), 'suyue-prefs-fs-'));
 const bookId = 'aaaaaaaaaaaaaaaa';
 try {
   const storageFile = writeStorageStub(tmp);
-  const wearengineStubPath = writeWearEngineStub(tmp);
   const load = createWatchLoader({
     tmpDir: tmp,
     stubPath: writeSystemFileStub(tmp, sandbox),
-    wearengineStubPath,
     routerStubPath: writeRouterStub(tmp),
     storageStubPath: storageFile
   });
@@ -52,10 +50,6 @@ try {
   p.progressReady = false;
   p.saving = false;
   p.progressError = '';
-  p.readerStorage = {
-    loadProgress: (id, callback) => progress.loadProgress(id, callback),
-    saveProgress: progress.saveProgress
-  };
   p.saveWanted = false;
   p.prefSaving = false;
   p.prefWanted = false;

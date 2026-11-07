@@ -5,13 +5,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeSystemFileStub } from './helpers/system_file_stub.mjs';
-import { createWatchLoader, writeWearEngineStub, writeRouterStub,
-  writeStorageStub }
+import { createWatchLoader, writeRouterStub, writeStorageStub }
   from './helpers/watch_module_loader.mjs';
 
 const tmp=mkdtempSync(join(tmpdir(),'suyue-onlycanvas-'));
 const disk=mkdtempSync(join(tmpdir(),'suyue-onlycanvas-fs-'));
-const wearengineStubPath=writeWearEngineStub(tmp);
 function canvas(options={}) {
   const state={gets:0,draws:0,backgrounds:0,metrics:0};
   return {width:420,height:420,state,
@@ -32,8 +30,7 @@ function canvas(options={}) {
 }
 try {
   const load=createWatchLoader({tmpDir:tmp,stubPath:writeSystemFileStub(tmp,disk),
-    wearengineStubPath,routerStubPath:writeRouterStub(tmp),
-    storageStubPath:writeStorageStub(tmp)});
+    routerStubPath:writeRouterStub(tmp),storageStubPath:writeStorageStub(tmp)});
   const mod=await load('pages/reader/reader.js');
   const book=Buffer.from('圆屏正文与正常的中文小说。'.repeat(120),'utf8');
   function page(ref){
@@ -46,7 +43,6 @@ try {
     p.isLoading=true;
     p.saved=0;p.scheduleSave=()=>{p.saved++};
     p.savePreferences=()=>{};
-    p.readerStorage={saveLastBook(_bookId,done){done({ok:true})}};
     p.reloads=0;p.loadPage=()=>{p.reloads++};
     return p;
   }
