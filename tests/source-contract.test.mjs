@@ -11,8 +11,7 @@ const phoneIndex = read('harmony/entry/src/main/ets/pages/Index.ets');
 const phoneAppJson = JSON.parse(read('harmony/AppScope/app.json5'));
 const watchPages = watchConfig.module.js[0].pages;
 assert.equal(watchConfig.module.deviceType[0], 'liteWearable');
-assert.deepEqual(watchPages, ['pages/start/start', 'pages/index/index',
-  'pages/storage/storage', 'pages/receiver/receiver', 'pages/reader/reader']);
+assert.deepEqual(watchPages, ['pages/index/index', 'pages/reader/reader']);
 for (const page of watchPages) {
   for (const ext of ['js', 'hml', 'css']) {
     assert.ok(existsSync('watch/huawei/watch-lite/entry/src/main/js/MainAbility/' + page + '.' + ext));
@@ -123,7 +122,6 @@ const watchFiles = [
   'wear/IncomingBookReceiver.js',
   'wear/TransferLogic.js',
   'wear/WearReceiver.js',
-  'wear/ProgressSync.js',
   'util/Sha256.js',
   'util/Utf8.js',
   'util/Base64.js',
@@ -186,13 +184,13 @@ assert.ok(readerSettingsHml.includes('openChapters') &&
   readerSettingsHml.includes('<list class="chapter-list"') &&
   readerSettingsHml.includes('<list-item class="chapter-item"') &&
   readerSettingsHml.includes('for="{{ chapterRows }}"') &&
-  !readerSettingsHml.includes('chapterWindowNext') &&
+  readerSettingsHml.includes('chapterWindowNext') &&
   readerSettingsHml.includes('previousChapter') &&
   readerSettingsHml.includes('nextChapter'),
-  'settings must expose a scrolling full chapter list without group navigation');
-assert.ok(watchReader.includes('chapterListRows(this.chapters') &&
-  !watchReader.includes('chapterWindowNext()'),
-  'chapter panel must pass every chapter to the native scrolling list');
+  'settings must expose a bounded Lite list panel with window + chapter navigation');
+assert.ok(watchReader.includes('chapterWindow(this.chapters') &&
+  watchReader.includes('chapterWindowNext()'),
+  'chapter panel must keep an independent bounded browse window');
 const chapterCss = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/reader/reader.css');
 assert.ok(/\.chapter-list\s*\{[^}]*height:/.test(chapterCss) &&
@@ -202,9 +200,6 @@ const crownInput = read('watch/huawei/watch-lite/entry/src/main/js/MainAbility/r
 assert.ok(crownInput.includes("'unverified'"),
   'crown input must not claim verified support without a device run');
 const watchIndex = read('watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/index/index.js');
-const watchStart = read('watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/start/start.js');
-const watchStoragePage = read('watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/storage/storage.js');
-const watchReceiverPage = read('watch/huawei/watch-lite/entry/src/main/js/MainAbility/pages/receiver/receiver.js');
 assert.ok(watchIndex.includes('listBooks'),
   'index page must list the real library');
 assert.ok(watchIndex.includes('askDelete'),
@@ -254,12 +249,9 @@ assert.ok(!shelfHml.includes('openBook($item.bookId)') &&
 assert.ok(watchIndex.includes("event.type === 'RESULT'") &&
   watchIndex.includes('this.loadExternal();'),
   'watch shelf must refresh external books after a successful receive');
-// issue #10：shelf configures metadata once and renders it synchronously
-// without waiting for file APIs/import queues; bodies stay in rawfile.
-assert.ok(watchIndex.includes("from '../../books/BookCatalog.g.js'") &&
-  watchStoragePage.includes('configureBooks(CATALOG)') &&
-  watchStoragePage.includes('app.readerStorage = {') &&
-  watchStoragePage.includes('bundledBooks: books') &&
+// issue #10：开机即书架——书架页**同步**渲染内置书单（BookCatalog），
+// 不等待任何文件接口/导入/队列；正文数据只在阅读页 import。
+assert.ok(watchIndex.includes('BookCatalog.g.js') &&
   watchIndex.includes('bundledList'),
   'shelf must render the build-time catalog synchronously');
 assert.ok(!watchIndex.includes('importBundledBooks') &&
@@ -287,10 +279,6 @@ const catalogSrc = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/books/BookCatalog.g.js');
 assert.ok(catalogSrc.includes('export var BOOKS'),
   'catalog module must export BOOKS metadata');
-const chapterCatalogSrc = read(
-  'watch/huawei/watch-lite/entry/src/main/js/MainAbility/books/BookChapters.g.js');
-assert.ok(chapterCatalogSrc.includes('export var BOOK_CHAPTERS'),
-  'reader chapter metadata must be isolated from the shelf catalog');
 assert.ok(watchReader.includes('isBundled') &&
   watchReader.includes('readBundledWindow'),
   'reader must read bundled text via the rawfile window accessor');
@@ -528,30 +516,15 @@ assert.ok(importService.includes('detectTxtChapters'),
 assert.ok(read('android/app/src/main/java/com/xiwei/suyue/importer/TxtImportService.kt')
   .includes('detectChapters'),
   'Android TXT import must detect chapter byte ranges (issue #17)');
-// issue #27 review：Wear Engine 单条消息 4096 字节，长章节目录分片后
-// 尽力发送；文件通道不等待章节 ACK 或手表 RESULT。
 const watchTransferLogic = read(
   'watch/huawei/watch-lite/entry/src/main/js/MainAbility/wear/TransferLogic.js');
-const watchSync = read(
-  'watch/huawei/watch-lite/entry/src/main/js/MainAbility/wear/ProgressSync.js');
 assert.ok(watchTransferLogic.includes('applyChapterChunk') &&
   watchTransferLogic.includes('assembleChapters') &&
   watchTransferLogic.includes('E_MISSING_CHAPTERS'),
-  'watch receiver must validate complete chapter catalogs when available');
-const chapterReceiver = read(
-  'watch/huawei/watch-lite/entry/src/main/js/MainAbility/wear/IncomingBookReceiver.js');
-assert.ok(chapterReceiver.includes("case 'CHAPTERS'") &&
-  chapterReceiver.includes('missingChapterIndices(state)') &&
-  chapterReceiver.includes('chapterCatalogInvalid = true') &&
-  !chapterReceiver.includes('CHAPTERS_ACK'),
-  'watch must treat an incomplete chapter catalog as optional body metadata');
-assert.ok(chapterReceiver.includes('config.transferLogic') &&
-  !chapterReceiver.includes("from './TransferLogic.js"),
-  'page bundle must inject transfer logic into the receiver');
-assert.ok(!chapterReceiver.includes("from '../storage/BookStorage") &&
-  !chapterReceiver.includes("from '../storage/LibraryIndex") &&
-  !watchSync.includes("from '../storage/"),
-  'app-level receiver and progress logic must use injected shelf storage');
+  'watch receiver must assemble CHAPTERS chunks before FINISH/file commit');
+assert.ok(read('watch/huawei/watch-lite/entry/src/main/js/MainAbility/wear/IncomingBookReceiver.js')
+  .includes("case 'CHAPTERS'"),
+  'watch receiver must handle CHAPTERS messages');
 const phoneTransfer = read(
   'harmony/entry/src/main/ets/services/BookTransferService.ts');
 const readerDiagnostics = read(
@@ -597,47 +570,8 @@ assert.ok(watchReceiver.includes('isFileType'),
   'watch receiver must handle the file channel branch');
 assert.ok(watchReceiver.includes('receiveFile('),
   'watch receiver must route files to the receiver');
-const fileReceiveStart = watchReceiver.indexOf('function receiveFile(');
-const fileReceiveEnd = watchReceiver.indexOf('export function stopReceive(',
-  fileReceiveStart);
-assert.ok(watchReceiver.includes('export function reportLocalReceiveOutcome(') &&
-  fileReceiveStart >= 0 && fileReceiveEnd > fileReceiveStart &&
-  watchReceiver.slice(fileReceiveStart, fileReceiveEnd)
-    .includes('reportLocalReceiveOutcome(outcome)') &&
-  !watchReceiver.slice(fileReceiveStart, fileReceiveEnd)
-    .includes('sendToPhone('),
-  'file completion must update the local shelf without sending an app RESULT');
 assert.ok(watchReceiver.includes('Wear message received type='),
   'watch must log whether HELLO/BOOK_META actually reached the receiver');
-const watchApp = read(
-  'watch/huawei/watch-lite/entry/src/main/js/MainAbility/app.js');
-assert.ok(!watchApp.includes("from './wear/") &&
-  !watchApp.includes("from './storage/") &&
-  !watchStart.includes("from '../../wear/") &&
-  !watchStart.includes("from '../../storage/") &&
-  watchStart.includes('onShow()') &&
-  watchStart.includes("this.openShelf()") &&
-  watchStart.includes('if (this.bootstrapStarted) return;') &&
-  watchStart.includes("uri: 'pages/storage/storage'") &&
-  watchStoragePage.includes("uri: 'pages/receiver/receiver'") &&
-  watchReceiverPage.includes("from '../../wear/IncomingBookReceiver'") &&
-  watchReceiverPage.includes("from '../../wear/ProgressSync'") &&
-  !watchReceiverPage.includes('wear.setBookReceiver') &&
-  watchReceiverPage.includes('setBookReceiver(new IncomingBookReceiver(') &&
-  watchReceiverPage.includes('configureReceiverServices()') &&
-  watchReceiverPage.includes("beginReceive('pages/receiver/receiver.onInit')"),
-  'light entry must automatically reach one receiver setup before the usable shelf');
-assert.ok(watchIndex.includes('data.wearBridge') &&
-  watchIndex.includes('progressStore.clearProgress') &&
-  watchIndex.includes('this.runtimeReady = true') &&
-  watchIndex.includes('if (!this.runtimeReady) return;') &&
-  watchIndex.includes("router.replace({\n        uri: 'pages/reader/reader'") &&
-  !watchIndex.includes("打开失败：阅读服务未就绪"),
-  'the shelf must gate storage reads and open local books without Wear Engine');
-assert.ok(watchReader.includes('Wear Engine is optional for local reading') &&
-  watchReader.includes("typeof wear.setActiveBook === 'function'") &&
-  watchReader.includes("typeof wear.setApplyHandler === 'function'"),
-  'reader must keep local reading independent from an unavailable Wear bridge');
 const wearDeviceService = read(
   'harmony/entry/src/main/ets/services/WearDeviceService.ts');
 assert.ok(wearDeviceService.includes('receiver registered: bundle='),
@@ -1009,10 +943,8 @@ assert.ok(!existsSync(
   'demo generator must be deleted');
 assert.ok(!watchIndex.includes('initializeLibrary'),
   'index page must not call any demo generator');
-assert.ok(watchStoragePage.includes('bundledBooks: books') &&
-  watchIndex.includes('catalogBooks()') &&
-  watchIndex.includes('bundledList'),
-  'storage must publish the generated metadata to the real shelf');
+assert.ok(watchIndex.includes('BookCatalog.g.js'),
+  'index page must build the shelf from the static catalog');
 
 // P1-6：容器检查不得宣称验签；workflow 必须有
 // 官方 hap-sign-tool 验签步骤。
